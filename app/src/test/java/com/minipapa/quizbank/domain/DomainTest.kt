@@ -1,0 +1,119 @@
+package com.minipapa.quizbank.domain
+
+import org.junit.Assert.*
+import org.junit.Test
+import kotlin.random.Random
+
+class DomainTest {
+    private val categories = listOf(Category("root", "IT"), Category("child", "Python", "root"), Category("leaf", "기초", "child"), Category("other", "성경"))
+    private fun question(id: String, category: String = "leaf", type: QuestionType = QuestionType.SHORT) =
+        Question(id, category, type, "문제 $id", if (type == QuestionType.MULTIPLE) listOf("첫째", "둘째") else emptyList(),
+            when (type) { QuestionType.MULTIPLE -> "1"; QuestionType.OX -> "O"; QuestionType.SHORT -> " HTML " })
+    private fun fails(action: () -> Unit) { assertTrue(runCatching(action).isFailure) }
+    @Test fun hierarchyIncludesEveryDescendantAndRejectsCyclesAndDuplicates() {
+        assertEquals(setOf("root", "child", "leaf"), CategoryTree.descendants(categories, setOf("root")))
+        assertEquals("IT/Python/기초", CategoryTree.path(categories, "leaf"))
+        fails { CategoryTree.validate(categories + Category("duplicate", "IT")) }
+        fails { CategoryTree.validate(listOf(Category("a", "A", "b"), Category("b", "B", "a"))) }
+        fails { CategoryTree.validate(listOf(Category("a", "A", "missing"))) }
+    }
+    @Test fun deepCategoriesAreTraversedWithoutRecursion() {
+        val deep = (0..1200).map { Category("$it", "단계$it", if (it == 0) null else "${it - 1}") }
+        CategoryTree.validate(deep)
+        assertEquals(1201, CategoryTree.descendants(deep, setOf("0")).size)
+        assertTrue(CategoryTree.path(deep, "1200").endsWith("단계1200"))
+    }
+    @Test fun multipleChoiceValidationAndOriginalOrderArePreserved() {
+        val q = question("q", type = QuestionType.MULTIPLE)
+        q.validate(); assertEquals("둘째", q.answerText)
+        fails { q.copy(options = listOf("하나")).validate() }
+        fails { q.copy(options = listOf("하나", "")).validate() }
+        fails { q.copy(answer = "2").validate() }
+        val result = ExamEngine.select(Bank(categories, listOf(q)), setOf("root"), setOf(QuestionType.MULTIPLE), 5, false)
+        assertTrue(result.isEmpty())
+    }
+    @Test fun onlyShortAnswersAreSelectedAndRegisteredContentAndAnswerArePreserved() {
+        val short = question("short").copy(content = "등록된 문제\n원문", answer = "등록된 정답")
+        val bank = Bank(categories, listOf(short, question("mc", type = QuestionType.MULTIPLE), question("ox", type = QuestionType.OX)))
+        val selected = ExamEngine.select(bank, emptySet(), QuestionType.entries.toSet(), 0, false)
+        assertEquals(listOf(short), selected)
+        val run = ExamRun(items = selected.map { ExamItem(it, "IT/Python/기초") })
+        assertEquals("등록된 문제\n원문", run.item.question.content)
+        assertTrue(run.submit("등록된 정답").responses.single().correct)
+        assertFalse(run.submit("다른 답").responses.single().correct)
+    }
+    @Test fun shortAnswerTrimsAndIgnoresEnglishCaseButNotInternalSpaces() {
+        val q = question("q")
+        assertTrue(q.correct("html")); assertTrue(q.correct(" HTML  "))
+        assertFalse(q.correct("HT ML"))
+        assertTrue(question("ox", type = QuestionType.OX).correct("O"))
+        assertFalse(question("ox", type = QuestionType.OX).correct("X"))
+    }
+    @Test fun examsUseSelectedTypesSubtreesAndNeverRepeatQuestions() {
+        val questions = (1..30).map { question("q$it", if (it % 2 == 0) "leaf" else "other") }
+        repeat(20) { seed ->
+            val result = ExamEngine.select(Bank(categories, questions), setOf("root", "child"), setOf(QuestionType.SHORT), 20, false, random = Random(seed))
+            assertEquals(15, result.size); assertEquals(15, result.map { it.id }.toSet().size)
+            assertTrue(result.all { it.categoryId == "leaf" })
+        }
+        assertTrue(ExamEngine.select(Bank(categories, questions), emptySet(), setOf(QuestionType.OX), 5, false).isEmpty())
+    }
+    @Test fun wrongFocusedFillsWithOtherQuestionsAndWrongOnlyDoesNot() {
+        val qs = (1..8).map { question("q$it") }
+        val history = listOf(AnswerHistory("a", "s", "q5", "leaf", "IT/Python/기초", "문제", "입력", "정답", "", false, QuestionType.SHORT))
+        val bank = Bank(categories, qs, answers = history)
+        assertEquals("q5", ExamEngine.select(bank, emptySet(), QuestionType.entries.toSet(), 5, true).first().id)
+        assertEquals(listOf("q5"), ExamEngine.select(bank, emptySet(), QuestionType.entries.toSet(), 0, false, true).map { it.id })
+    }
+    @Test fun manualShortAnswerOverrideAndExamStateRoundTrip() {
+        var run = ExamRun(items = listOf(ExamItem(question("q"), "IT/Python")))
+        assertEquals(run, run.next())
+        run = run.submit("잘못된 표현")
+        assertFalse(run.responses.single().correct)
+        assertEquals(run, run.submit("HTML"))
+        run = run.toggle()
+        assertTrue(run.finished); assertEquals(1, run.correctCount)
+        assertEquals(run, JsonCodec.readExam(JsonCodec.exam(run)))
+    }
+    @Test fun csvSupportsBomQuotesCommasNewlinesAndAllTypes() {
+        val text = "\uFEFF" + CsvImport.header.joinToString(",") + "\r\n" +
+            "IT/Python,MULTIPLE,\"쉼표, 따옴표 \"\"와\"\"\n줄바꿈\",첫째,둘째,,,,2,해설\r\n" +
+            "성경,OX,O/X 문제,,,,,,O,\r\n" + "IT,SHORT,영문 약자,,,,,,HTML,설명"
+        val preview = CsvImport.preview(text)
+        assertTrue(preview.errors.toString(), preview.errors.isEmpty())
+        assertEquals(3, preview.questions.size)
+        assertEquals("쉼표, 따옴표 \"와\"\n줄바꿈", preview.questions[0].question.content)
+        assertEquals("둘째", preview.questions[0].question.answerText)
+        assertEquals(4, preview.questions[1].line)
+    }
+    @Test fun csvInvalidRowsAreReportedWithoutDiscardingGoodRows() {
+        val text = CsvImport.header.joinToString(",") + "\nIT,SHORT,좋은 문제,,,,,,정답,\nIT,UNKNOWN,유형 오류,,,,,,답,\nIT,MULTIPLE,정답 오류,A,B,,,,5,"
+        val preview = CsvImport.preview(text)
+        assertEquals(1, preview.questions.size); assertEquals(2, preview.errors.size)
+        assertTrue(preview.errors[0].startsWith("3행"))
+        assertTrue(CsvImport.preview(CsvImport.header.joinToString(",") + "\n\"닫히지 않음").errors.isNotEmpty())
+    }
+    @Test fun backupRoundTripPreservesKoreanOptionsAndLearningHistory() {
+        val q = question("q", type = QuestionType.MULTIPLE)
+        val bank = Bank(categories, listOf(q), listOf(SessionSummary("s", 1, 2, 1, 0)),
+            listOf(AnswerHistory("a", "s", "q", "leaf", "IT/Python/기초", q.content, "첫째", "둘째", "해설", false, q.type)))
+        assertEquals(bank, JsonCodec.readBackup(JsonCodec.backup(bank)))
+        fails { JsonCodec.readBackup(JsonCodec.backup(bank).replace("\"version\": 1", "\"version\": 99")) }
+    }
+    @Test fun backupRejectsDanglingReferencesAndIncorrectTotals() {
+        fails { JsonCodec.validate(Bank(categories, listOf(question("q", "missing")))) }
+        fails { JsonCodec.validate(Bank(categories, sessions = listOf(SessionSummary("s", 1, 2, 1, 1)))) }
+    }
+    @Test fun restoreSkipsOrOverwritesByIdAndMergesCategoryPaths() {
+        val q = question("q")
+        val current = Bank(categories, listOf(q))
+        val incoming = Bank(listOf(Category("different-root", "IT"), Category("different-child", "Python", "different-root"),
+            Category("different-leaf", "기초", "different-child")), listOf(q.copy(categoryId = "different-leaf", content = "바뀐 문제")))
+        val merged = RestorePlan.build(current, incoming, RestoreMode.MERGE)
+        assertEquals(4, merged.categories.size); assertEquals(q, merged.questions.single())
+        val overwritten = RestorePlan.build(current, incoming, RestoreMode.OVERWRITE)
+        assertEquals("바뀐 문제", overwritten.questions.single().content)
+        assertEquals("leaf", overwritten.questions.single().categoryId)
+        assertEquals(incoming, RestorePlan.build(current, incoming, RestoreMode.REPLACE))
+    }
+}

@@ -1,0 +1,6 @@
+categoryPath,type,question,option1,option2,option3,option4,option5,answer,explanation
+CSV 예제/IT/Python,MULTIPLE,리스트의 길이를 구하는 함수는?,len(),size(),length(),,,1,len()은 리스트의 원소 수를 반환합니다.
+CSV 예제/IT/Linux,OX,Linux는 운영체제이다.,,,,,,O,운영체제의 한 종류입니다.
+CSV 예제/일반 상식,SHORT,대한민국의 수도는?,,,,,,서울,서울입니다.
+CSV 예제/IT/웹,SHORT,Hypertext Markup Language의 약자는?,,,,,,HTML,영문 대소문자를 구별하지 않습니다.
+CSV 예제/일반 상식,MULTIPLE,"다음 중 ""과일""은 무엇인가요?",사과,자동차,의자,,,1,"사과는 과일입니다. 쉼표, 따옴표도 가져올 수 있습니다."
