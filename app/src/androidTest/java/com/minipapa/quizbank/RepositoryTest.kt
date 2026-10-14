@@ -19,7 +19,7 @@ class RepositoryTest {
             val bank = repo.snapshot()
             assertEquals(4, bank.categories.size)
             val root = bank.categories.first { it.name == "IT" }
-            assertEquals(2, ExamEngine.candidates(bank, setOf(root.id), QuestionType.entries.toSet()).size)
+            assertEquals(0, ExamEngine.candidates(bank, setOf(root.id), QuestionType.entries.toSet()).size)
             val q = bank.questions.first { it.type == QuestionType.MULTIPLE }
             val run = ExamRun(items = listOf(ExamItem(q, CategoryTree.path(bank.categories, q.categoryId)))).submit("1")
             repo.complete(run); repo.complete(run)

@@ -9,3 +9,11 @@ local.properties
 *.jks
 *.keystore
 output/
+**/google-services.json
+**/node_modules/
+functions/lib/
+functions/.env*
+!functions/.env.example
+functions/.secret.local
+firebase-debug*.log
+.firebase/

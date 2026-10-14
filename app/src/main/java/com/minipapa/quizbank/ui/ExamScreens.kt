@@ -7,18 +7,26 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.minipapa.quizbank.domain.*
 import com.minipapa.quizbank.navigation.*
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
+
+@Composable fun AiReviewSummary(review: AnswerReview, manuallyJudged: Boolean = false) {
+    val text = review.historyText() + if (manuallyJudged) "\n최종 정답 여부는 직접 변경한 판정을 사용합니다." else ""
+    Text(text, modifier = Modifier.testTag("ai-feedback"), maxLines = 10, overflow = TextOverflow.Ellipsis)
+}
 
 @Composable fun ExamSetupScreen(bank: Bank, model: BankViewModel) {
     var categories by rememberSaveable { mutableStateOf(listOf<String>()) }
     var count by rememberSaveable { mutableIntStateOf(5) }
     var wrongFirst by rememberSaveable { mutableStateOf(false) }
+    var aiReview by rememberSaveable { mutableStateOf(false) }
     var replace by remember { mutableStateOf(false) }
     val typeSet = setOf(QuestionType.SHORT)
     val available = ExamEngine.candidates(bank, categories.toSet(), typeSet).size
-    val start = { model.start(categories.toSet(), typeSet, count, wrongFirst, false) }
+    val start = { model.start(categories.toSet(), typeSet, count, wrongFirst, false, aiReview) }
     Body {
         Heading("어떤 문제를 풀까요?")
         Hint("카테고리를 선택하지 않으면 전체에서 출제합니다. 상위 카테고리는 모든 하위 문제를 포함합니다.")
@@ -33,7 +41,7 @@ import com.minipapa.quizbank.navigation.*
         FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             QuestionType.entries.forEach { type -> FilterChip(type in typeSet, {}, label = { Text(type.label) }, enabled = type.enabled) }
         }
-        Hint("단답형으로 출제합니다. ‘용어란 무엇인가?’ 형태는 설명을 보고 해당 용어를 답합니다.")
+        Hint("등록된 단답형 문제 내용을 그대로 출제하고, 등록된 정답으로 채점합니다.")
         Heading("문제 수")
         FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             listOf(5, 10, 20, 0).forEach { n -> FilterChip(count == n, { count = n }, label = { Text(if (n == 0) "전체" else "${n}개") }) }
@@ -44,6 +52,12 @@ import com.minipapa.quizbank.navigation.*
             FilterChip(wrongFirst, { wrongFirst = true }, label = { Text("오답 문제 중심") })
         }
         if (wrongFirst) Hint("틀린 문제를 먼저 출제하고 남은 자리는 다른 문제로 채웁니다. 각 그룹의 순서는 무작위입니다.")
+        Heading("답안 검토")
+        Row {
+            Checkbox(aiReview, { aiReview = it }, modifier = Modifier.testTag("enable-ai-review"))
+            Text("AI로 의미와 부족한 용어 검토", Modifier.padding(top = 12.dp))
+        }
+        Hint("AI 검토를 켜면 정확히 일치하지 않는 답안을 의미로 평가합니다. 질문·정답·해설·입력 답안을 OpenAI에 전송하며 인터넷과 API 사용료가 필요합니다. 일부 맞음은 통계에서 오답으로 집계합니다.")
         Card(Modifier.fillMaxWidth()) { Text("출제 가능 ${available}개 · 이번 시험 ${if (count == 0) available else minOf(count, available)}개",
             Modifier.padding(20.dp), fontWeight = FontWeight.Bold) }
         if (count > available && count != 0) Hint("요청한 ${count}개보다 문제가 적어 가능한 ${available}개로 출제합니다.")
@@ -55,6 +69,7 @@ import com.minipapa.quizbank.navigation.*
 @Composable fun ExamScreen(run: ExamRun, model: BankViewModel) {
     val q = run.item.question
     var input by rememberSaveable(run.id, run.index) { mutableStateOf("") }
+    val aiReviewing by model.aiReviewing.collectAsStateWithLifecycle()
     Body {
         Hint("문제 ${run.index + 1} / ${run.items.size} · ${q.type.label}")
         LinearProgressIndicator(progress = { run.responses.size.toFloat() / run.items.size }, modifier = Modifier.fillMaxWidth())
@@ -82,16 +97,37 @@ import com.minipapa.quizbank.navigation.*
             Card(Modifier.fillMaxWidth(), colors = CardDefaults.cardColors(containerColor =
                 if (response.correct) MaterialTheme.colorScheme.primaryContainer else MaterialTheme.colorScheme.errorContainer)) {
                 Column(Modifier.padding(20.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                    Heading(if (response.correct) "정답입니다!" else "다시 익혀 보세요")
+                    Heading(when {
+                        aiReviewing -> "AI가 답안을 검토하고 있습니다"
+                        run.pendingReview -> "AI 검토가 필요합니다"
+                        response.correct -> "정답입니다!"
+                        response.review?.verdict == ReviewVerdict.PARTIAL && !response.manuallyJudged -> "일부 맞았습니다"
+                        else -> "다시 익혀 보세요"
+                    })
                     Text("정답: ${q.answerText}")
+                    Text("입력한 답: ${response.input}")
+                    response.review?.let { review ->
+                        AiReviewSummary(review, response.manuallyJudged)
+                    }
                     if (q.explanation.isNotEmpty()) Text(q.explanation)
                     if (q.type == QuestionType.SHORT) {
+                        if (response.review == null) {
+                            Hint("AI 검토는 질문·정답·해설·입력 답안을 OpenAI에 전송합니다. 인터넷과 API 사용료가 필요합니다.")
+                            OutlinedButton(model::reviewAnswer, enabled = !LocalBusy.current, modifier = Modifier.testTag("review-answer")) {
+                                Text(if (aiReviewing) "검토 중…" else "AI로 답안 검토")
+                            }
+                        }
+                        if (run.pendingReview && !aiReviewing) {
+                            Hint("검토가 완료되지 않았습니다. 다시 시도하거나 직접 판정할 수 있습니다.")
+                            TextButton(model::acceptLocalGrading, enabled = !LocalBusy.current) { Text("기본 채점으로 진행") }
+                        }
                         Hint("표현이 달라도 의미가 맞다면 직접 정답 처리하세요.")
                         OutlinedButton(model::toggleCorrect, enabled = !LocalBusy.current) { Text(if (response.correct) "오답으로 변경" else "정답으로 변경") }
                     }
                 }
             }
-            Action(if (run.index == run.items.lastIndex) "시험 완료 및 결과 저장" else "다음 문제", model::next, modifier = Modifier.testTag("next-question"))
+            Action(if (run.index == run.items.lastIndex) "시험 완료 및 결과 저장" else "다음 문제", model::next,
+                modifier = Modifier.testTag("next-question"), enabled = !run.pendingReview)
         }
     }
 }
@@ -110,6 +146,7 @@ import com.minipapa.quizbank.navigation.*
                 Column(Modifier.padding(18.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                     Text(item.question.content, fontWeight = FontWeight.Bold)
                     Text("정답: ${item.question.answerText}")
+                    run.responses[index].review?.let { AiReviewSummary(it, run.responses[index].manuallyJudged) }
                     if (item.question.explanation.isNotEmpty()) Text(item.question.explanation)
                 }
             }

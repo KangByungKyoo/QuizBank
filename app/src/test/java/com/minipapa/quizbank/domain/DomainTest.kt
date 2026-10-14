@@ -5,35 +5,72 @@ import org.junit.Test
 import kotlin.random.Random
 
 class DomainTest {
-    @Test fun definitionCsvBecomesDescriptionQuestionWithTermAnswerAndKeepsMultilineExplanation() {
+    @Test fun utf8AndKoreanExcelCsvKeepSingleLevelCategoryWithInternalSpaces() {
+        val text = CsvImport.header.joinToString(",") +
+            "\r\n 회사 업무 ,SHORT,\"다음 설명에 해당하는 용어는?\n개념 검증\",,,,,,PoC,\"첫째 줄\n둘째 줄\""
+        val encodings = listOf(text.toByteArray(Charsets.UTF_8),
+            ("\uFEFF" + text).toByteArray(Charsets.UTF_8), text.toByteArray(java.nio.charset.Charset.forName("MS949")))
+        encodings.forEach { bytes ->
+            val decoded = CsvImport.decode(bytes)
+            assertEquals(text, decoded)
+            val preview = CsvImport.preview(decoded)
+            assertTrue(preview.errors.toString(), preview.errors.isEmpty())
+            val imported = preview.questions.single()
+            assertEquals("회사 업무", imported.categoryPath)
+            assertEquals("PoC", imported.question.answer)
+            assertEquals("첫째 줄\n둘째 줄", imported.question.explanation)
+        }
+    }
+    @Test fun invalidCsvEncodingGivesActionableMessageInsteadOfInputLength() {
+        val invalidInputs = listOf(byteArrayOf(0xFF.toByte()),
+            byteArrayOf(0xEF.toByte(), 0xBB.toByte(), 0xBF.toByte(), 0xBB.toByte()))
+        invalidInputs.forEach { bytes ->
+            val error = runCatching { CsvImport.decode(bytes) }.exceptionOrNull()
+            assertTrue(error is IllegalArgumentException)
+            assertTrue(error!!.message!!.contains("CSV UTF-8"))
+            assertFalse(error.message!!.contains("Input length"))
+        }
+    }
+    @Test fun csvPreservesDescriptionQuestionTermAnswerAndMultilineExplanation() {
         val explanation = "PoC는 Proof of Concept(개념 검증)의 약자다.\n대규모 개발에 앞서 핵심 기능이 실제로 가능한지 소규모로 시험한다.\n완성품 개발보다는 기술적 위험과 불확실성을 줄이는 데 목적이 있다."
         val description = "새 아이디어나 기술의 실현 가능성을 확인하는 개념 검증"
-        val csv = CsvImport.header.joinToString(",") + "\nIT,SHORT,PoC란 무엇인가?,,,,,,$description,\"$explanation\""
+        val content = "다음 설명에 해당하는 용어는 무엇인가요?\n\n$description"
+        val csv = CsvImport.header.joinToString(",") + "\nIT,SHORT,\"$content\",,,,,,PoC,\"$explanation\""
         val preview = CsvImport.preview(csv)
         assertTrue(preview.errors.toString(), preview.errors.isEmpty())
         val q = preview.questions.single().question
-        assertEquals("다음 설명에 해당하는 용어는 무엇인가요?\n\n$description", q.content)
+        assertEquals(content, q.content)
         assertEquals("PoC", q.answer)
         assertEquals(explanation, q.explanation)
-        assertEquals(q, q.asShortAnswerPrompt())
+        assertEquals(q, ExamEngine.select(Bank(questions = listOf(q)), emptySet(), setOf(QuestionType.SHORT), 0, false).single())
         assertTrue(q.correct(" poc "))
         assertFalse(q.correct(description))
     }
-    @Test fun existingDefinitionQuestionsAreConvertedForNewExamsWithoutChangingBank() {
+    @Test fun definitionQuestionsAreNotAutomaticallyReversedOrRewritten() {
         listOf("PoC란 무엇인가?", "PoC이란 무엇인가?", "PoC는 무엇인가요?", "PoC은 무엇인가？").forEach { content ->
             val original = question("poc").copy(content = content, answer = "개념 검증", explanation = "해설")
             val bank = Bank(categories, listOf(original))
             val q = ExamEngine.select(bank, emptySet(), setOf(QuestionType.SHORT), 0, false).single()
-            assertEquals("PoC", q.answer)
-            assertEquals(original.id, q.id)
-            assertEquals(original.explanation, q.explanation)
+            assertEquals(original, q)
             assertEquals(original, bank.questions.single())
-            assertTrue(ExamRun(items = listOf(ExamItem(q, "IT"))).submit("PoC").responses.single().correct)
+            assertTrue(ExamRun(items = listOf(ExamItem(q, "IT"))).submit("개념 검증").responses.single().correct)
         }
-        val regular = question("regular").copy(content = "대한민국의 수도는?", answer = "서울")
-        assertEquals(regular, regular.asShortAnswerPrompt())
-        val ox = question("ox", type = QuestionType.OX).copy(content = "PoC란 무엇인가?")
-        assertEquals(ox, ox.asShortAnswerPrompt())
+    }
+    @Test fun convertedItTermsFileImportsAll34QuestionsWithoutChangingTheirFields() {
+        val text = java.io.File("../examples/회사_업무_IT용어_34개_단답형.csv").readText(Charsets.UTF_8)
+        val rows = CsvImport.rows(text).drop(1)
+        val preview = CsvImport.preview(text)
+        assertTrue(preview.errors.toString(), preview.errors.isEmpty())
+        assertEquals(34, preview.questions.size)
+        rows.zip(preview.questions).forEach { (row, imported) ->
+            assertEquals(row.fields[0], imported.categoryPath)
+            assertEquals(QuestionType.SHORT, imported.question.type)
+            assertEquals(row.fields[2], imported.question.content)
+            assertEquals(row.fields[8], imported.question.answer)
+            assertEquals(row.fields[9], imported.question.explanation)
+        }
+        assertEquals("PoC", preview.questions.first().question.answer)
+        assertTrue(preview.questions.all { it.question.content.startsWith("다음 설명에 해당하는 용어는 무엇인가요?") })
     }
     private val categories = listOf(Category("root", "IT"), Category("child", "Python", "root"), Category("leaf", "기초", "child"), Category("other", "성경"))
     private fun question(id: String, category: String = "leaf", type: QuestionType = QuestionType.SHORT) =

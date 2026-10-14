@@ -4,6 +4,8 @@ import android.graphics.Bitmap
 import android.net.Uri
 import androidx.compose.ui.graphics.asAndroidBitmap
 import androidx.compose.ui.test.*
+import androidx.compose.ui.semantics.SemanticsActions
+import androidx.compose.ui.text.TextLayoutResult
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.lifecycle.SavedStateHandle
 import androidx.room.Room
@@ -21,6 +23,66 @@ import org.junit.Test
 import java.io.File
 
 class AppFlowTest {
+    @Test fun longAiReviewUsesAtMostTenVisibleLinesAndKeepsMissingTermFirst() {
+        val review = AnswerReview(ReviewVerdict.PARTIAL, "아주 긴 검토 내용입니다.\n".repeat(30), listOf("이미지"), "설명을 보완합니다.\n".repeat(30))
+        rule.setContent { QuizTheme { AiReviewSummary(review) } }
+        rule.onNodeWithTag("ai-feedback").assertTextContains("보완할 용어: 이미지", substring = true)
+        rule.onNodeWithTag("ai-feedback").performSemanticsAction(SemanticsActions.GetTextLayoutResult) { getLayout ->
+            val layouts = mutableListOf<TextLayoutResult>()
+            assertTrue(getLayout(layouts))
+            assertTrue(layouts.single().lineCount <= 10)
+            assertTrue(layouts.single().isLineEllipsized(layouts.single().lineCount - 1))
+        }
+    }
+    @Test fun aiPartialFeedbackShowsMissingConceptAndPersistsInHistory(): Unit = runBlocking {
+        val db = Room.inMemoryDatabaseBuilder(context, BankDatabase::class.java).build()
+        try {
+            val repo = BankRepository(db)
+            repo.saveCategory(Category("work", "회사 업무"))
+            val q = Question("docker", "work", QuestionType.SHORT, "컨테이너를 만드는 읽기 전용 템플릿은?", answer = "Docker 이미지", explanation = "원본 해설")
+            repo.saveQuestion(q)
+            val partial = AnswerReview(ReviewVerdict.PARTIAL, "Docker는 맞지만 이미지가 빠졌습니다.", listOf("이미지"), "이미지는 컨테이너 생성에 필요한 파일과 설정의 템플릿입니다.")
+            val run = ExamRun(items = listOf(ExamItem(q, "회사 업무")), aiReviewEnabled = true)
+            val model = BankViewModel(repo, SavedStateHandle(mapOf("exam" to JsonCodec.exam(run), "page" to "EXAM")),
+                AnswerReviewer { question, input -> assertEquals(q, question); assertEquals("도커", input); partial })
+            model.loaded.first { it }
+            rule.setContent { QuizTheme { QuizBankApp(model) } }
+            rule.onNodeWithTag("exam-input").performTextInput("도커")
+            rule.onNodeWithTag("submit-answer").performScrollTo().performClick()
+            rule.waitUntil(10_000) { model.exam.value?.responses?.firstOrNull()?.review != null }
+            rule.onNodeWithText("일부 맞았습니다").performScrollTo().assertIsDisplayed()
+            rule.onNodeWithText("보완할 용어: 이미지", substring = true).performScrollTo().assertIsDisplayed()
+            assertEquals(partial, repo.draft()!!.responses.single().review)
+            rule.onNodeWithTag("next-question").performScrollTo().performClick()
+            rule.waitUntil(10_000) { model.page.value == Page.RESULTS }
+            val bank = repo.snapshot()
+            assertEquals(0, bank.sessions.single().correct)
+            assertTrue(bank.answers.single().explanation.contains(partial.rationale))
+            assertTrue(bank.answers.single().explanation.startsWith("원본 해설"))
+            assertEquals(bank, JsonCodec.readBackup(JsonCodec.backup(bank)))
+        } finally { db.close() }
+    }
+    @Test fun failedAiReviewKeepsAnswerAndRequiresExplicitFallback(): Unit = runBlocking {
+        val db = Room.inMemoryDatabaseBuilder(context, BankDatabase::class.java).build()
+        try {
+            val repo = BankRepository(db)
+            val q = Question("docker", "work", QuestionType.SHORT, "템플릿은?", answer = "Docker 이미지")
+            val run = ExamRun(items = listOf(ExamItem(q, "회사 업무")), aiReviewEnabled = true)
+            val model = BankViewModel(repo, SavedStateHandle(mapOf("exam" to JsonCodec.exam(run), "page" to "EXAM")),
+                AnswerReviewer { _, _ -> throw IllegalStateException("테스트 연결 실패") })
+            model.loaded.first { it }
+            rule.setContent { QuizTheme { QuizBankApp(model) } }
+            rule.onNodeWithTag("exam-input").performTextInput("도커")
+            rule.onNodeWithTag("submit-answer").performScrollTo().performClick()
+            rule.waitUntil(10_000) { model.exam.value?.answered == true && !model.busy.value }
+            assertEquals("도커", repo.draft()!!.responses.single().input)
+            assertTrue(model.exam.value!!.pendingReview)
+            rule.onNodeWithTag("next-question").performScrollTo().assertIsNotEnabled()
+            rule.onNodeWithText("기본 채점으로 진행").performScrollTo().performClick()
+            rule.waitUntil(10_000) { model.exam.value?.pendingReview == false }
+            rule.onNodeWithTag("next-question").performScrollTo().assertIsEnabled()
+        } finally { db.close() }
+    }
     @get:Rule val rule = createComposeRule()
     private val context get() = InstrumentationRegistry.getInstrumentation().targetContext
     private fun screenshot(name: String) {

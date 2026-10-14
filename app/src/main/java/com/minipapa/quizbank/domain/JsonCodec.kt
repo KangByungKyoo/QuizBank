@@ -55,14 +55,24 @@ object JsonCodec {
         }
     }
     fun exam(run: ExamRun): String = JSONObject().put("id", run.id).put("startedAt", run.startedAt).put("index", run.index)
+        .put("aiReviewEnabled", run.aiReviewEnabled)
         .put("items", JSONArray(run.items.map { JSONObject().put("question", question(it.question)).put("path", it.categoryPath) }))
-        .put("responses", JSONArray(run.responses.map { JSONObject().put("input", it.input).put("correct", it.correct) })).toString()
+        .put("responses", JSONArray(run.responses.map { response -> JSONObject().put("input", response.input).put("correct", response.correct).put("manuallyJudged", response.manuallyJudged)
+            .put("review", response.review?.let { JSONObject().put("verdict", it.verdict.name).put("feedback", it.feedback)
+                .put("missingConcepts", JSONArray(it.missingConcepts)).put("rationale", it.rationale) } ?: JSONObject.NULL) })).toString()
     fun readExam(text: String?): ExamRun? = runCatching {
         if (text == null) return null
         val o = JSONObject(text)
         val run = ExamRun(o.getString("id"), o.getLong("startedAt"), o.getJSONArray("items").items {
             ExamItem(readQuestion(it.getJSONObject("question")), it.getString("path")) }, o.getInt("index"),
-            o.getJSONArray("responses").items { ExamResponse(it.getString("input"), it.getBoolean("correct")) })
+            o.getJSONArray("responses").items { response ->
+                val review = response.optJSONObject("review")?.let {
+                    val missing = it.getJSONArray("missingConcepts")
+                    AnswerReview(ReviewVerdict.valueOf(it.getString("verdict")), it.getString("feedback"),
+                        List(missing.length()) { index -> missing.getString(index) }, it.getString("rationale")).also { it.validate() }
+                }
+                ExamResponse(response.getString("input"), response.getBoolean("correct"), review, response.optBoolean("manuallyJudged", false))
+            }, o.optBoolean("aiReviewEnabled", false))
         require(run.items.isNotEmpty() && run.index in run.items.indices && run.responses.size in run.index..run.index + 1)
         run
     }.getOrNull()

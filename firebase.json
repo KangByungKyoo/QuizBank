@@ -1,0 +1,9 @@
+{
+  "functions": [{
+    "source": "functions",
+    "codebase": "quizbank",
+    "runtime": "nodejs22",
+    "ignore": ["node_modules", ".git", "test", ".env.example", ".secret.local", "firebase-debug*.log"],
+    "predeploy": ["npm --prefix functions run build"]
+  }]
+}

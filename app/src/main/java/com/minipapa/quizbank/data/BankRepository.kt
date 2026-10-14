@@ -46,6 +46,9 @@ class BankRepository(private val db: BankDatabase) {
     suspend fun deleteQuestion(id: String) = db.withTransaction { dao.deleteQuestion(id) }
     suspend fun complete(run: ExamRun) = db.withTransaction {
         require(run.finished) { "모든 문제를 푼 뒤 시험을 완료해 주세요." }
+        require(!run.aiReviewEnabled || run.responses.all { it.correct || it.review != null || it.manuallyJudged }) {
+            "AI 검토를 완료하거나 직접 판정한 뒤 시험을 완료해 주세요."
+        }
         val inserted = dao.putSession(ExamSessionEntity(run.id, run.startedAt, System.currentTimeMillis(), run.items.size, run.correctCount))
         if (inserted != -1L) {
             val questions = dao.readQuestions().map { it.id }.toSet()
@@ -54,7 +57,10 @@ class BankRepository(private val db: BankDatabase) {
                 val q = item.question; val response = run.responses[index]
                 val input = if (q.type == QuestionType.MULTIPLE) q.options.getOrNull(response.input.toIntOrNull() ?: -1).orEmpty() else response.input
                 ExamAnswerEntity("${run.id}:$index", run.id, q.id.takeIf { it in questions }, q.categoryId.takeIf { it in categories },
-                    item.categoryPath, q.content, input, q.answerText, q.explanation, response.correct, q.type.name)
+                    item.categoryPath, q.content, input, q.answerText,
+                    listOfNotNull(q.explanation.takeIf { it.isNotBlank() }, response.review?.historyText()?.let {
+                        if (response.manuallyJudged) "$it\n최종 판정(직접 변경): ${if (response.correct) "정답" else "오답"}" else it
+                    }).joinToString("\n\n"), response.correct, q.type.name)
             })
         }
     }

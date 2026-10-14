@@ -12,12 +12,13 @@ enum class Page(val title: String) {
     HOME("문제 은행"), CATEGORIES("카테고리 관리"), QUESTIONS("문제 관리"), EDIT("문제 등록"),
     EXAM_SETUP("시험 설정"), EXAM("문제 풀이"), RESULTS("시험 결과"), WRONG("오답 노트"), STATS("학습 통계"), SETTINGS("데이터 관리")
 }
-class BankViewModel(val repository: BankRepository, private val saved: SavedStateHandle) : ViewModel() {
+class BankViewModel(val repository: BankRepository, private val saved: SavedStateHandle, private val reviewer: AnswerReviewer? = null) : ViewModel() {
     val message = MutableStateFlow<String?>(null)
     val bank = repository.bank.catch { message.value = "데이터를 읽지 못했습니다: ${it.message}" }
         .stateIn(viewModelScope, SharingStarted.Eagerly, Bank())
     val loaded = MutableStateFlow(false)
     val busy = MutableStateFlow(false)
+    val aiReviewing = MutableStateFlow(false)
     val page = MutableStateFlow(runCatching { Page.valueOf(saved["page"] ?: "HOME") }.getOrDefault(Page.HOME))
     val exam = MutableStateFlow(JsonCodec.readExam(saved["exam"]))
     val editing = MutableStateFlow<Question?>(null)
@@ -64,25 +65,45 @@ class BankViewModel(val repository: BankRepository, private val saved: SavedStat
         exam.value = value
         saved["exam"] = null
     }
-    fun start(selected: Set<String>, types: Set<QuestionType>, count: Int, wrongFirst: Boolean, wrongOnly: Boolean) = run {
+    fun start(selected: Set<String>, types: Set<QuestionType>, count: Int, wrongFirst: Boolean, wrongOnly: Boolean, aiReviewEnabled: Boolean = false) = run {
         val current = repository.snapshot()
         val questions = ExamEngine.select(current, selected, types, count, wrongFirst, wrongOnly)
         require(questions.isNotEmpty()) { "출제할 문제가 없습니다. 카테고리와 문제 유형을 확인해 주세요." }
-        val run = ExamRun(items = questions.map { ExamItem(it, CategoryTree.path(current.categories, it.categoryId)) })
+        val run = ExamRun(items = questions.map { ExamItem(it, CategoryTree.path(current.categories, it.categoryId)) }, aiReviewEnabled = aiReviewEnabled)
         repository.saveDraft(run); setExam(run)
         navigate(Page.EXAM)
     }
-    fun submit(input: String) = run { exam.value?.let { val updated = it.submit(input); repository.saveDraft(updated); setExam(updated) } }
+    fun submit(input: String) = run {
+        val current = exam.value ?: return@run
+        if (current.answered) return@run
+        val updated = current.submit(input)
+        repository.saveDraft(updated); setExam(updated)
+        if (updated.pendingReview) reviewRun(updated)
+    }
+    private suspend fun reviewRun(current: ExamRun) {
+        val service = reviewer ?: error("AI 검토가 설정되지 않았습니다.")
+        require(current.answered && current.item.question.type == QuestionType.SHORT) { "제출된 단답형 답안만 검토할 수 있습니다." }
+        aiReviewing.value = true
+        try {
+            val result = service.review(current.item.question, current.responses[current.index].input)
+            if (exam.value?.id != current.id || exam.value?.index != current.index) return
+            val updated = current.withReview(result)
+            repository.saveDraft(updated); setExam(updated)
+        } finally { aiReviewing.value = false }
+    }
+    fun reviewAnswer() = run { exam.value?.let { reviewRun(it) } }
+    fun acceptLocalGrading() = run { exam.value?.let { val updated = it.acceptLocalGrading(); repository.saveDraft(updated); setExam(updated) } }
     fun toggleCorrect() = run { exam.value?.let { val updated = it.toggle(); repository.saveDraft(updated); setExam(updated) } }
     fun next() = run {
         val current = exam.value ?: return@run
+        require(!current.pendingReview) { "AI 검토를 다시 시도하거나 직접 판정해 주세요." }
         if (current.finished) {
             repository.complete(current); navigate(Page.RESULTS)
         } else { val updated = current.next(); repository.saveDraft(updated); setExam(updated) }
     }
     fun abandon() = run { repository.saveDraft(null); setExam(null); navigate(Page.HOME) }
     fun samples() = run { val n = repository.addSamples(); message.value = if (n == 0) "샘플 문제가 이미 있습니다." else "샘플 문제 ${n}개를 별도 카테고리에 추가했습니다." }
-    private suspend fun readFile(resolver: ContentResolver, uri: Uri): String = withContext(Dispatchers.IO) {
+    private suspend fun readFile(resolver: ContentResolver, uri: Uri): ByteArray = withContext(Dispatchers.IO) {
         val bytes = resolver.openInputStream(uri)?.use { input ->
             val output = java.io.ByteArrayOutputStream()
             val buffer = ByteArray(8192)
@@ -94,11 +115,11 @@ class BankViewModel(val repository: BankRepository, private val saved: SavedStat
             }
             output.toByteArray()
         } ?: error("파일을 열지 못했습니다.")
-        val decoder = Charsets.UTF_8.newDecoder().onMalformedInput(java.nio.charset.CodingErrorAction.REPORT)
-        decoder.decode(java.nio.ByteBuffer.wrap(bytes)).toString()
+        bytes
     }
     fun readCsv(resolver: ContentResolver, uri: Uri) = run {
-        csv.value = withContext(Dispatchers.Default) { CsvImport.preview(readFile(resolver, uri)) }
+        csv.value = null
+        csv.value = withContext(Dispatchers.Default) { CsvImport.preview(CsvImport.decode(readFile(resolver, uri))) }
     }
     fun importCsv() = run {
         val preview = csv.value ?: return@run
@@ -106,7 +127,16 @@ class BankViewModel(val repository: BankRepository, private val saved: SavedStat
         csv.value = null; message.value = "문제 ${count}개를 가져왔습니다."; navigate(Page.QUESTIONS)
     }
     fun readBackup(resolver: ContentResolver, uri: Uri) = run {
-        backup.value = withContext(Dispatchers.Default) { JsonCodec.readBackup(readFile(resolver, uri).removePrefix("\uFEFF")) }
+        backup.value = withContext(Dispatchers.Default) {
+            val bytes = readFile(resolver, uri)
+            val text = try {
+                Charsets.UTF_8.newDecoder().onMalformedInput(java.nio.charset.CodingErrorAction.REPORT)
+                    .decode(java.nio.ByteBuffer.wrap(bytes)).toString()
+            } catch (e: java.nio.charset.CharacterCodingException) {
+                throw IllegalArgumentException("JSON 백업 파일은 UTF-8 형식이어야 합니다.", e)
+            }
+            JsonCodec.readBackup(text.removePrefix("\uFEFF"))
+        }
     }
     fun restore(mode: RestoreMode) = run {
         val incoming = backup.value ?: return@run

@@ -78,7 +78,6 @@ object ExamEngine {
     fun candidates(bank: Bank, selected: Set<String>, types: Set<QuestionType>): List<Question> {
         val ids = CategoryTree.descendants(bank.categories, selected)
         return bank.questions.filter { (selected.isEmpty() || it.categoryId in ids) && it.type.enabled && it.type in types }
-            .map { it.asShortAnswerPrompt() }
     }
     fun select(bank: Bank, selected: Set<String>, types: Set<QuestionType>, count: Int,
         wrongFirst: Boolean, wrongOnly: Boolean = false, random: Random = Random.Default): List<Question> {
@@ -88,22 +87,16 @@ object ExamEngine {
     }
 }
 
-// Recognize definition questions only; ordinary short-answer questions keep their original meaning.
-private val definitionQuestion = Regex("^(.+?)(?:이란|란|은|는)\\s*무엇인가(?:요)?\\s*[?？.]?$")
-fun Question.asShortAnswerPrompt(): Question {
-    if (type != QuestionType.SHORT) return this
-    val term = definitionQuestion.matchEntire(content.trim())?.groupValues?.get(1)?.trim() ?: return this
-    if (term.isBlank() || answer.isBlank()) return this
-    return copy(content = "다음 설명에 해당하는 용어는 무엇인가요?\n\n$answer", answer = term)
-}
 data class ExamItem(val question: Question, val categoryPath: String)
-data class ExamResponse(val input: String, val correct: Boolean)
+data class ExamResponse(val input: String, val correct: Boolean, val review: AnswerReview? = null, val manuallyJudged: Boolean = false)
 data class ExamRun(val id: String = newId(), val startedAt: Long = System.currentTimeMillis(),
-    val items: List<ExamItem>, val index: Int = 0, val responses: List<ExamResponse> = emptyList()) {
+    val items: List<ExamItem>, val index: Int = 0, val responses: List<ExamResponse> = emptyList(), val aiReviewEnabled: Boolean = false) {
     val item get() = items[index]
     val answered get() = responses.size > index
     val finished get() = responses.size == items.size
     val correctCount get() = responses.count { it.correct }
+    val pendingReview get() = answered && aiReviewEnabled && !responses[index].correct &&
+        responses[index].review == null && !responses[index].manuallyJudged
     fun submit(input: String): ExamRun {
         if (answered) return this
         val q = item.question
@@ -115,6 +108,14 @@ data class ExamRun(val id: String = newId(), val startedAt: Long = System.curren
         return copy(responses = responses + ExamResponse(input, q.correct(input)))
     }
     fun toggle() = if (answered && item.question.type == QuestionType.SHORT)
-        copy(responses = responses.toMutableList().also { it[index] = it[index].copy(correct = !it[index].correct) }) else this
-    fun next() = if (!answered || index == items.lastIndex) this else copy(index = index + 1)
+        copy(responses = responses.toMutableList().also { it[index] = it[index].copy(correct = !it[index].correct, manuallyJudged = true) }) else this
+    fun acceptLocalGrading() = if (answered) copy(responses = responses.toMutableList().also {
+        it[index] = it[index].copy(manuallyJudged = true)
+    }) else this
+    fun withReview(review: AnswerReview): ExamRun {
+        require(answered && item.question.type == QuestionType.SHORT) { "제출된 단답형 답안만 검토할 수 있습니다." }
+        review.validate()
+        return copy(responses = responses.toMutableList().also { it[index] = it[index].copy(correct = review.correct, review = review, manuallyJudged = false) })
+    }
+    fun next() = if (!answered || pendingReview || index == items.lastIndex) this else copy(index = index + 1)
 }

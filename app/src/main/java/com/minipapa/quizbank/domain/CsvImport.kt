@@ -1,10 +1,32 @@
 package com.minipapa.quizbank.domain
 
+import java.nio.ByteBuffer
+import java.nio.charset.CharacterCodingException
+import java.nio.charset.Charset
+import java.nio.charset.CodingErrorAction
+
 data class CsvRow(val line: Int, val fields: List<String>)
 data class ImportQuestion(val line: Int, val categoryPath: String, val question: Question)
 data class ImportPreview(val questions: List<ImportQuestion>, val errors: List<String>)
 object CsvImport {
     val header = listOf("categoryPath", "type", "question", "option1", "option2", "option3", "option4", "option5", "answer", "explanation")
+    fun decode(bytes: ByteArray): String {
+        fun strict(charset: Charset) = charset.newDecoder()
+            .onMalformedInput(CodingErrorAction.REPORT)
+            .onUnmappableCharacter(CodingErrorAction.REPORT)
+            .decode(ByteBuffer.wrap(bytes)).toString().removePrefix("\uFEFF")
+        try { return strict(Charsets.UTF_8) }
+        catch (e: CharacterCodingException) {
+            // A UTF-8 BOM declares the encoding; do not reinterpret damaged UTF-8 as CP949.
+            val utf8Bom = bytes.size >= 3 && bytes[0] == 0xEF.toByte() &&
+                bytes[1] == 0xBB.toByte() && bytes[2] == 0xBF.toByte()
+            if (!utf8Bom) {
+                try { return strict(Charset.forName("MS949")) }
+                catch (_: CharacterCodingException) { /* Report an actionable error below. */ }
+            }
+            throw IllegalArgumentException("CSV 파일의 문자 인코딩을 읽을 수 없습니다. Excel에서 ‘CSV UTF-8(쉼표로 분리)’ 형식으로 다시 저장해 주세요.", e)
+        }
+    }
     fun rows(source: String): List<CsvRow> {
         val text = source.removePrefix("\uFEFF")
         val result = mutableListOf<CsvRow>()
@@ -71,7 +93,7 @@ object CsvImport {
                     QuestionType.SHORT -> f[8]
                 }
                 val q = Question(categoryId = "pending", type = type, content = f[2],
-                    options = if (type == QuestionType.MULTIPLE) options else emptyList(), answer = answer, explanation = f[9]).asShortAnswerPrompt()
+                    options = if (type == QuestionType.MULTIPLE) options else emptyList(), answer = answer, explanation = f[9])
                 q.validate()
                 valid.add(ImportQuestion(row.line, path.joinToString("/"), q))
             }.onFailure { errors.add("${row.line}행: ${it.message}") }

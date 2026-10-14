@@ -4,6 +4,11 @@ plugins {
     id("org.jetbrains.kotlin.plugin.compose")
     id("org.jetbrains.kotlin.kapt")
 }
+// UI tests use a separate package and run without production Firebase credentials.
+if (file("google-services.json").exists()) apply(plugin = "com.google.gms.google-services")
+tasks.configureEach {
+    if (name == "processUiTestGoogleServices") enabled = false
+}
 android {
     namespace = "com.minipapa.quizbank"
     compileSdk = 36
@@ -48,6 +53,13 @@ dependencies {
     implementation("androidx.compose.ui:ui")
     implementation("androidx.compose.material3:material3")
     debugImplementation("androidx.compose.ui:ui-tooling")
+    implementation(platform("com.google.firebase:firebase-bom:34.0.0"))
+    implementation("com.google.firebase:firebase-auth")
+    implementation("com.google.firebase:firebase-functions")
+    implementation("com.google.firebase:firebase-appcheck-playintegrity")
+    debugImplementation("com.google.firebase:firebase-appcheck-debug")
+    add("uiTestImplementation", "com.google.firebase:firebase-appcheck-debug")
+    implementation("org.jetbrains.kotlinx:kotlinx-coroutines-play-services:1.10.2")
     add("uiTestImplementation", "androidx.compose.ui:ui-test-manifest")
     testImplementation("junit:junit:4.13.2")
     testImplementation("org.json:json:20240303")
