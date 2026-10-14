@@ -78,6 +78,7 @@ object ExamEngine {
     fun candidates(bank: Bank, selected: Set<String>, types: Set<QuestionType>): List<Question> {
         val ids = CategoryTree.descendants(bank.categories, selected)
         return bank.questions.filter { (selected.isEmpty() || it.categoryId in ids) && it.type.enabled && it.type in types }
+            .map { it.asShortAnswerPrompt() }
     }
     fun select(bank: Bank, selected: Set<String>, types: Set<QuestionType>, count: Int,
         wrongFirst: Boolean, wrongOnly: Boolean = false, random: Random = Random.Default): List<Question> {
@@ -85,6 +86,15 @@ object ExamEngine {
         val ordered = if (wrongFirst) eligible.filter { bank.wrongCount(it.id) > 0 } + eligible.filter { bank.wrongCount(it.id) == 0 } else eligible
         return if (count == 0) ordered else ordered.take(count)
     }
+}
+
+// Recognize definition questions only; ordinary short-answer questions keep their original meaning.
+private val definitionQuestion = Regex("^(.+?)(?:이란|란|은|는)\\s*무엇인가(?:요)?\\s*[?？.]?$")
+fun Question.asShortAnswerPrompt(): Question {
+    if (type != QuestionType.SHORT) return this
+    val term = definitionQuestion.matchEntire(content.trim())?.groupValues?.get(1)?.trim() ?: return this
+    if (term.isBlank() || answer.isBlank()) return this
+    return copy(content = "다음 설명에 해당하는 용어는 무엇인가요?\n\n$answer", answer = term)
 }
 data class ExamItem(val question: Question, val categoryPath: String)
 data class ExamResponse(val input: String, val correct: Boolean)

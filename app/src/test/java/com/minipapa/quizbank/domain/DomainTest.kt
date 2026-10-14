@@ -5,6 +5,36 @@ import org.junit.Test
 import kotlin.random.Random
 
 class DomainTest {
+    @Test fun definitionCsvBecomesDescriptionQuestionWithTermAnswerAndKeepsMultilineExplanation() {
+        val explanation = "PoC는 Proof of Concept(개념 검증)의 약자다.\n대규모 개발에 앞서 핵심 기능이 실제로 가능한지 소규모로 시험한다.\n완성품 개발보다는 기술적 위험과 불확실성을 줄이는 데 목적이 있다."
+        val description = "새 아이디어나 기술의 실현 가능성을 확인하는 개념 검증"
+        val csv = CsvImport.header.joinToString(",") + "\nIT,SHORT,PoC란 무엇인가?,,,,,,$description,\"$explanation\""
+        val preview = CsvImport.preview(csv)
+        assertTrue(preview.errors.toString(), preview.errors.isEmpty())
+        val q = preview.questions.single().question
+        assertEquals("다음 설명에 해당하는 용어는 무엇인가요?\n\n$description", q.content)
+        assertEquals("PoC", q.answer)
+        assertEquals(explanation, q.explanation)
+        assertEquals(q, q.asShortAnswerPrompt())
+        assertTrue(q.correct(" poc "))
+        assertFalse(q.correct(description))
+    }
+    @Test fun existingDefinitionQuestionsAreConvertedForNewExamsWithoutChangingBank() {
+        listOf("PoC란 무엇인가?", "PoC이란 무엇인가?", "PoC는 무엇인가요?", "PoC은 무엇인가？").forEach { content ->
+            val original = question("poc").copy(content = content, answer = "개념 검증", explanation = "해설")
+            val bank = Bank(categories, listOf(original))
+            val q = ExamEngine.select(bank, emptySet(), setOf(QuestionType.SHORT), 0, false).single()
+            assertEquals("PoC", q.answer)
+            assertEquals(original.id, q.id)
+            assertEquals(original.explanation, q.explanation)
+            assertEquals(original, bank.questions.single())
+            assertTrue(ExamRun(items = listOf(ExamItem(q, "IT"))).submit("PoC").responses.single().correct)
+        }
+        val regular = question("regular").copy(content = "대한민국의 수도는?", answer = "서울")
+        assertEquals(regular, regular.asShortAnswerPrompt())
+        val ox = question("ox", type = QuestionType.OX).copy(content = "PoC란 무엇인가?")
+        assertEquals(ox, ox.asShortAnswerPrompt())
+    }
     private val categories = listOf(Category("root", "IT"), Category("child", "Python", "root"), Category("leaf", "기초", "child"), Category("other", "성경"))
     private fun question(id: String, category: String = "leaf", type: QuestionType = QuestionType.SHORT) =
         Question(id, category, type, "문제 $id", if (type == QuestionType.MULTIPLE) listOf("첫째", "둘째") else emptyList(),

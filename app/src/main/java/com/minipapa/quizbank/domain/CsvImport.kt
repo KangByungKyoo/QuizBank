@@ -71,7 +71,7 @@ object CsvImport {
                     QuestionType.SHORT -> f[8]
                 }
                 val q = Question(categoryId = "pending", type = type, content = f[2],
-                    options = if (type == QuestionType.MULTIPLE) options else emptyList(), answer = answer, explanation = f[9])
+                    options = if (type == QuestionType.MULTIPLE) options else emptyList(), answer = answer, explanation = f[9]).asShortAnswerPrompt()
                 q.validate()
                 valid.add(ImportQuestion(row.line, path.joinToString("/"), q))
             }.onFailure { errors.add("${row.line}행: ${it.message}") }

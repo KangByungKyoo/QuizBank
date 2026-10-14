@@ -27,6 +27,7 @@ import com.minipapa.quizbank.navigation.*
     Body {
         Heading("문제를 한 번에 가져오기")
         Hint("PC에서 작성한 UTF-8 CSV를 선택해 미리보기와 오류 행을 확인한 뒤 등록합니다.")
+        Hint("단답형의 ‘PoC란 무엇인가?’ 같은 정의 질문은 설명을 보고 용어를 답하는 문제로 가져옵니다. CSV의 answer가 출제 설명이 되고, question의 용어(PoC)가 정답이 됩니다. 해설은 유지됩니다. 다른 형태의 질문은 원문 그대로 가져옵니다.")
         Action("CSV 파일 선택", { importCsv.launch(arrayOf("text/*", "application/csv", "application/octet-stream")) })
         Hint("헤더: ${CsvImport.header.joinToString(", ")}")
         Hint("유형: MULTIPLE / OX / SHORT\n객관식 정답: 보기 번호 1~5\n카테고리: IT/Python/내장함수\n따옴표 안의 쉼표, 줄바꿈, 큰따옴표를 지원합니다. 존재하지 않는 카테고리는 자동 생성합니다.")

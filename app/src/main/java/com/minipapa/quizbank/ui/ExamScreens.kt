@@ -33,7 +33,7 @@ import com.minipapa.quizbank.navigation.*
         FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             QuestionType.entries.forEach { type -> FilterChip(type in typeSet, {}, label = { Text(type.label) }, enabled = type.enabled) }
         }
-        Hint("등록된 단답형 문제 내용이 출제되며, 등록된 정답으로 채점합니다.")
+        Hint("단답형으로 출제합니다. ‘용어란 무엇인가?’ 형태는 설명을 보고 해당 용어를 답합니다.")
         Heading("문제 수")
         FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             listOf(5, 10, 20, 0).forEach { n -> FilterChip(count == n, { count = n }, label = { Text(if (n == 0) "전체" else "${n}개") }) }
