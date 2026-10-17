@@ -10,7 +10,7 @@ import androidx.compose.ui.unit.dp
 import com.minipapa.quizbank.domain.*
 
 @Composable fun QuestionEditor(bank: Bank, existing: Question?, onSave: (Question) -> Unit, onCancel: () -> Unit) {
-    var category by rememberSaveable(existing?.id) { mutableStateOf(existing?.categoryId) }
+    var category by rememberSaveable(existing?.id) { mutableStateOf(existing?.categoryId?.takeIf { it.isNotBlank() }) }
     var typeName by rememberSaveable(existing?.id) { mutableStateOf((existing?.type ?: QuestionType.SHORT).name) }
     val type = QuestionType.valueOf(typeName)
     var content by rememberSaveable(existing?.id) { mutableStateOf(existing?.content.orEmpty()) }
@@ -21,8 +21,10 @@ import com.minipapa.quizbank.domain.*
     var explanation by rememberSaveable(existing?.id) { mutableStateOf(existing?.explanation.orEmpty()) }
     var error by remember { mutableStateOf<String?>(null) }
     Body {
-        if (bank.categories.isEmpty()) Hint("먼저 홈의 카테고리 관리에서 카테고리를 추가해 주세요.")
+        Hint("정답만 입력해도 저장할 수 있어요. 카테고리와 문제 내용까지 채우면 Ready로 바뀌어 시험에 출제됩니다. 해설은 선택입니다.")
+        if (bank.categories.isEmpty()) Hint("카테고리는 나중에 문제 탭의 카테고리 관리에서 추가할 수 있어요.")
         CategoryPicker(bank.categories, category, { category = it })
+        if (category != null) TextButton({ category = null }) { Text("카테고리 선택 해제") }
         Heading("문제 유형")
         FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             QuestionType.entries.forEach { item -> FilterChip(type == item, { typeName = item.name }, label = { Text(item.label) }, enabled = item.enabled) }
@@ -62,7 +64,7 @@ import com.minipapa.quizbank.domain.*
                 if (type == QuestionType.MULTIPLE) options else emptyList(),
                 when (type) { QuestionType.MULTIPLE -> "$correctIndex"; QuestionType.OX -> ox; QuestionType.SHORT -> short },
                 explanation, existing?.createdAt ?: System.currentTimeMillis(), System.currentTimeMillis(), existing?.sample ?: false)
-            runCatching { q.validate(); require(bank.categories.any { it.id == q.categoryId }) { "카테고리를 선택해 주세요." } }
+            runCatching { q.validate(); require(q.categoryId.isBlank() || bank.categories.any { it.id == q.categoryId }) { "카테고리를 다시 선택해 주세요." } }
                 .onSuccess { onSave(q) }.onFailure { error = it.message }
         }, modifier = Modifier.testTag("save-question"), enabled = type.enabled)
         TextButton(onCancel, Modifier.fillMaxWidth()) { Text("취소") }

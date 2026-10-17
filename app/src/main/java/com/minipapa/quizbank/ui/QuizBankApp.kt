@@ -5,10 +5,16 @@ import androidx.compose.foundation.layout.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.runtime.saveable.rememberSaveableStateHolder
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Home
+import androidx.compose.material.icons.automirrored.filled.List
+import androidx.compose.material.icons.filled.DateRange
+import androidx.compose.material.icons.filled.Settings
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.minipapa.quizbank.navigation.*
 
@@ -21,18 +27,40 @@ import com.minipapa.quizbank.navigation.*
     val busy by model.busy.collectAsStateWithLifecycle()
     val message by model.message.collectAsStateWithLifecycle()
     val snack = remember { SnackbarHostState() }
+    val listState = rememberSaveableStateHolder()
     var leave by rememberSaveable { mutableStateOf(false) }
+    val roots = listOf(Page.HOME, Page.PROBLEMS, Page.LEARNING, Page.SETTINGS)
+    val selectedTab = when (page) {
+        Page.PROBLEMS, Page.QUESTIONS, Page.CATEGORIES, Page.EDIT -> Page.PROBLEMS
+        Page.LEARNING, Page.WRONG, Page.STATS -> Page.LEARNING
+        Page.SETTINGS -> Page.SETTINGS
+        else -> Page.HOME
+    }
+    val showNavigation = page !in listOf(Page.EXAM, Page.EDIT)
     fun back() {
-        if (page == Page.EXAM || page == Page.EDIT) leave = true else model.navigate(Page.HOME)
+        if (page == Page.EXAM || page == Page.EDIT) leave = true else model.back()
     }
     BackHandler(page != Page.HOME) { back() }
     LaunchedEffect(message) { message?.let { snack.showSnackbar(it); model.message.value = null } }
     CompositionLocalProvider(LocalBusy provides busy) {
-        Scaffold(bottomBar = { SnackbarHost(snack, Modifier.navigationBarsPadding()) }, topBar = {
+        Scaffold(snackbarHost = { SnackbarHost(snack) }, bottomBar = {
+            if (showNavigation) NavigationBar {
+                roots.forEach { tab ->
+                    val icon = when (tab) {
+                        Page.HOME -> Icons.Default.Home
+                        Page.PROBLEMS -> Icons.AutoMirrored.Filled.List
+                        Page.LEARNING -> Icons.Default.DateRange
+                        else -> Icons.Default.Settings
+                    }
+                    NavigationBarItem(selected = selectedTab == tab, onClick = { if (page != tab) model.navigate(tab) },
+                        icon = { Icon(icon, contentDescription = null) }, label = { Text(if (tab == Page.HOME) "홈" else tab.title) }, enabled = !busy)
+                }
+            }
+        }, topBar = {
             Surface(color = MaterialTheme.colorScheme.background) {
                 Row(Modifier.fillMaxWidth().statusBarsPadding().padding(horizontal = 12.dp, vertical = 8.dp),
                     verticalAlignment = Alignment.CenterVertically) {
-                    if (page != Page.HOME) TextButton({ back() }, enabled = !busy) { Text("‹ 뒤로") }
+                    if (page !in roots) TextButton({ back() }, enabled = !busy) { Text("‹ 뒤로") }
                     Text(if (page == Page.EDIT && editing != null) "문제 수정" else page.title,
                         style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold, modifier = Modifier.weight(1f))
                     if (busy) CircularProgressIndicator(Modifier.size(24.dp), strokeWidth = 2.dp)
@@ -44,9 +72,11 @@ import com.minipapa.quizbank.navigation.*
                     if (!loaded) Box(Modifier.fillMaxSize(), Alignment.Center) { CircularProgressIndicator() }
                     else when (page) {
                         Page.HOME -> HomeScreen(bank, exam?.takeUnless { run -> bank.sessions.any { it.id == run.id } }, model)
+                        Page.PROBLEMS -> MenuScreen(false, model)
+                        Page.LEARNING -> MenuScreen(true, model)
                         Page.CATEGORIES -> CategoriesScreen(bank, model)
-                        Page.QUESTIONS -> QuestionsScreen(bank, model, false)
-                        Page.WRONG -> QuestionsScreen(bank, model, true)
+                        Page.QUESTIONS -> listState.SaveableStateProvider("questions") { QuestionsScreen(bank, model, false) }
+                        Page.WRONG -> listState.SaveableStateProvider("wrong") { QuestionsScreen(bank, model, true) }
                         Page.EDIT -> QuestionEditor(bank, editing, model::save, model::cancelEdit)
                         Page.EXAM_SETUP -> ExamSetupScreen(bank, model)
                         Page.EXAM -> exam?.let { ExamScreen(it, model) }

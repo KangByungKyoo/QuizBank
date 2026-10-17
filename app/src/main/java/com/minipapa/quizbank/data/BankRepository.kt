@@ -12,7 +12,7 @@ class BankRepository(private val db: BankDatabase) {
     private suspend fun read(): Bank {
         val options = dao.readOptions().groupBy { it.questionId }
         return Bank(dao.readCategories().map { Category(it.id, it.name, it.parentId) },
-            dao.readQuestions().map { Question(it.id, it.categoryId, QuestionType.valueOf(it.type), it.content,
+            dao.readQuestions().map { Question(it.id, it.categoryId.orEmpty(), QuestionType.valueOf(it.type), it.content,
                 options[it.id].orEmpty().sortedBy { o -> o.position }.map { o -> o.text }, it.answer, it.explanation, it.createdAt, it.updatedAt, it.sample) },
             dao.readSessions().map { SessionSummary(it.id, it.startedAt, it.completedAt, it.total, it.correct) },
             dao.readAnswers().map { AnswerHistory(it.id, it.sessionId, it.questionId, it.categoryId, it.categoryPath,
@@ -38,7 +38,7 @@ class BankRepository(private val db: BankDatabase) {
     }
     private suspend fun putQuestion(q: Question) {
         q.validate()
-        dao.putQuestion(QuestionEntity(q.id, q.categoryId, q.type.name, q.content, q.answer, q.explanation, q.createdAt, q.updatedAt, q.sample))
+        dao.putQuestion(QuestionEntity(q.id, q.categoryId.takeIf { it.isNotBlank() }, q.type.name, q.content, q.answer, q.explanation, q.createdAt, q.updatedAt, q.sample))
         dao.deleteOptions(q.id)
         dao.putOptions(q.options.mapIndexed { index, text -> QuestionOptionEntity(q.id, index, text) })
     }
@@ -82,7 +82,7 @@ class BankRepository(private val db: BankDatabase) {
     suspend fun restore(incoming: Bank, mode: RestoreMode) = db.withTransaction {
         val planned = RestorePlan.build(read(), incoming, mode)
         // A single transaction keeps old data intact if validation or insertion fails.
-        dao.clearDraft(); dao.clearSessions()
+        dao.clearDraft(); dao.clearSessions(); dao.clearQuestions()
         val oldCategories = dao.readCategories().map { Category(it.id, it.name, it.parentId) }
         oldCategories.sortedByDescending { CategoryTree.path(oldCategories, it.id).length }.forEach { dao.deleteCategory(it.id) }
         val remaining = planned.categories.toMutableList(); val inserted = mutableSetOf<String>()

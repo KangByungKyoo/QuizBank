@@ -23,6 +23,88 @@ import org.junit.Test
 import java.io.File
 
 class AppFlowTest {
+    @Test fun answerOnlyRegistrationCanBeFilteredAndCompletedWithoutExplanation(): Unit = runBlocking {
+        val db = Room.inMemoryDatabaseBuilder(context, BankDatabase::class.java).build()
+        try {
+            val repo = BankRepository(db)
+            val model = BankViewModel(repo, SavedStateHandle())
+            model.loaded.first { it }
+            rule.setContent { QuizTheme { QuizBankApp(model) } }
+            rule.onNodeWithText("문제 추가").performScrollTo().performClick()
+            rule.onNodeWithTag("save-question").performScrollTo().performClick()
+            rule.onNodeWithText("단답형 정답을 입력해 주세요.").performScrollTo().assertIsDisplayed()
+            assertTrue(repo.snapshot().questions.isEmpty())
+            rule.onNodeWithTag("short-answer").performScrollTo().performTextInput("PoC")
+            rule.onNodeWithTag("save-question").performScrollTo().performClick()
+            rule.waitUntil(10_000) { model.page.value == Page.QUESTIONS && model.bank.value.questions.size == 1 }
+            rule.waitUntil(10_000) { model.message.value == null }
+            assertFalse(repo.snapshot().questions.single().isReady)
+            assertTrue(ExamEngine.candidates(repo.snapshot(), emptySet(), setOf(QuestionType.SHORT)).isEmpty())
+            rule.onNodeWithTag("status-filter-Ready").performScrollTo().performClick()
+            rule.onNodeWithText("해당하는 문제가 없습니다.").assertIsDisplayed()
+            rule.onNodeWithTag("status-filter-Not Ready").performClick()
+            rule.onNodeWithText("정답: PoC").performScrollTo().assertIsDisplayed()
+            rule.onNodeWithText("보완 필요: 카테고리 · 문제 내용").performScrollTo().assertIsDisplayed()
+            screenshot("not-ready-list")
+            repo.saveCategory(Category("it", "IT"))
+            rule.waitUntil { model.bank.value.categories.size == 1 }
+            rule.onNodeWithText("수정").performScrollTo().performClick()
+            rule.onNodeWithText("카테고리: 선택해 주세요").performScrollTo().performClick()
+            rule.onNodeWithText("IT", useUnmergedTree = true).performClick()
+            rule.onNodeWithTag("question-content").performScrollTo().performTextInput("개념 검증의 약자는?")
+            rule.onNodeWithTag("save-question").performScrollTo().performClick()
+            rule.waitUntil(10_000) { model.page.value == Page.QUESTIONS && model.bank.value.questions.single().isReady }
+            rule.onNodeWithTag("status-filter-Not Ready").assertIsSelected()
+            rule.onNodeWithText("해당하는 문제가 없습니다.").assertIsDisplayed()
+            rule.onNodeWithTag("status-filter-Ready").performClick()
+            rule.onNodeWithText("개념 검증의 약자는?").performScrollTo().assertIsDisplayed()
+            rule.onNodeWithText("정답: PoC").performScrollTo().assertIsDisplayed()
+            rule.onNodeWithText("해설 보기").performScrollTo().performClick()
+            rule.onNodeWithText("등록된 해설이 없습니다.").performScrollTo().assertIsDisplayed()
+            rule.onNodeWithText("해설 닫기").performScrollTo().performClick()
+            rule.onNodeWithText("정답: PoC").performScrollTo().assertIsDisplayed()
+            screenshot("question-answer-visible")
+            assertEquals("", repo.snapshot().questions.single().explanation)
+            assertEquals(1, ExamEngine.candidates(repo.snapshot(), emptySet(), setOf(QuestionType.SHORT)).size)
+        } finally { db.close() }
+    }
+    @Test fun bottomTabsAndHomeCategoryKeepExistingDataAndFilterDescendants(): Unit = runBlocking {
+        val db = Room.inMemoryDatabaseBuilder(context, BankDatabase::class.java).build()
+        try {
+            val repo = BankRepository(db)
+            repo.saveCategory(Category("work", "회사 업무"))
+            repo.saveCategory(Category("child", "개발", "work"))
+            repo.saveCategory(Category("other", "기타"))
+            repo.saveQuestion(Question("child-q", "child", QuestionType.SHORT, "하위 문제", answer = "정답"))
+            repo.saveQuestion(Question("other-q", "other", QuestionType.SHORT, "다른 문제", answer = "정답"))
+            val original = repo.snapshot()
+            val model = BankViewModel(repo, SavedStateHandle())
+            model.loaded.first { it }; model.bank.first { it.questions.size == 2 }
+            rule.setContent { QuizTheme { QuizBankApp(model) } }
+            rule.onNodeWithText("2개").assertIsDisplayed()
+            rule.onNodeWithText("문제", useUnmergedTree = true).performClick()
+            rule.onNodeWithText("카테고리 관리").assertIsDisplayed()
+            rule.onNodeWithText("문제 관리").performClick()
+            rule.onNodeWithText("하위 문제").assertIsDisplayed()
+            rule.runOnIdle { model.back() }
+            rule.waitUntil { model.page.value == Page.PROBLEMS }
+            rule.onNodeWithText("학습", useUnmergedTree = true).performClick()
+            rule.onNodeWithText("학습 통계").assertIsDisplayed()
+            rule.onNodeWithText("설정", useUnmergedTree = true).performClick()
+            rule.onNodeWithText("CSV 파일 선택").assertIsDisplayed()
+            rule.onNodeWithText("홈", useUnmergedTree = true).performClick()
+            rule.onNodeWithText("회사 업무").performClick()
+            rule.onNodeWithText("회사 업무").assertIsSelected()
+            screenshot("compact-home")
+            rule.onNodeWithText("랜덤 시험 시작").performClick()
+            rule.onNodeWithText("시험 시작").performScrollTo().performClick()
+            rule.waitUntil(10_000) { model.page.value == Page.EXAM }
+            assertEquals(listOf("child-q"), model.exam.value!!.items.map { it.question.id })
+            rule.onNodeWithText("홈").assertDoesNotExist()
+            assertEquals(original, repo.snapshot())
+            screenshot("compact-home-filtered-exam")
+        } finally { db.close() }
+    }
     @Test fun longAiReviewUsesAtMostTenVisibleLinesAndKeepsMissingTermFirst() {
         val review = AnswerReview(ReviewVerdict.PARTIAL, "아주 긴 검토 내용입니다.\n".repeat(30), listOf("이미지"), "설명을 보완합니다.\n".repeat(30))
         rule.setContent { QuizTheme { AiReviewSummary(review) } }
@@ -100,7 +182,7 @@ class AppFlowTest {
             model.loaded.first { it }; model.bank.first { it.categories.size == 2 }
             rule.setContent { QuizTheme { QuizBankApp(model) } }
             screenshot("home")
-            rule.onNodeWithText("＋ 문제 등록").performScrollTo().performClick()
+            rule.onNodeWithText("문제 추가").performScrollTo().performClick()
             rule.onNodeWithText("카테고리: 선택해 주세요").performScrollTo().performClick()
             rule.onNodeWithText("IT/Python").performClick()
             rule.onNodeWithTag("question-content").performScrollTo().performTextInput("Python의 길이 함수는?")
@@ -115,10 +197,16 @@ class AppFlowTest {
                 throw AssertionError("page=${model.page.value}, busy=${model.busy.value}, message=${model.message.value}, questions=${model.bank.value.questions.size}\n${rule.onRoot().printToString()}", e)
             }
             rule.onNodeWithText("Python의 길이 함수는?").performScrollTo().assertIsDisplayed()
+            rule.waitUntil(10_000) { model.message.value == null }
             rule.runOnIdle { model.navigate(Page.EXAM_SETUP) }
             rule.onNodeWithText("요청한 5개보다 문제가 적어 가능한 1개로 출제합니다.").performScrollTo().assertIsDisplayed()
+            rule.waitUntil(10_000) { !model.busy.value }
             rule.onNodeWithTag("start-exam").performScrollTo().performClick()
-            rule.waitUntil(10_000) { model.page.value == Page.EXAM }
+            try { rule.waitUntil(10_000) { model.page.value == Page.EXAM } }
+            catch (e: Throwable) {
+                screenshot("exam-start-failure")
+                throw AssertionError("page=${model.page.value}, busy=${model.busy.value}, message=${model.message.value}\n${rule.onRoot().printToString()}", e)
+            }
             rule.onNodeWithTag("exam-input").performScrollTo().performTextInput("len()")
             rule.onNodeWithTag("submit-answer").performScrollTo().performClick()
             rule.onNodeWithText("정답: len()").performScrollTo().assertIsDisplayed()

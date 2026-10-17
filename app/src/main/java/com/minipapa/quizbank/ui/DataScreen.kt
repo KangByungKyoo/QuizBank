@@ -24,6 +24,7 @@ import com.minipapa.quizbank.navigation.*
     var restoreMode by remember { mutableStateOf(RestoreMode.MERGE) }
     var confirmReplace by remember { mutableStateOf(false) }
     var confirmImport by remember { mutableStateOf(false) }
+    var samples by remember { mutableStateOf(false) }
     Body {
         Heading("문제를 한 번에 가져오기")
         Hint("PC에서 작성한 CSV를 선택해 미리보기와 오류 행을 확인한 뒤 등록합니다. UTF-8과 한국어 Excel의 CP949 형식을 지원합니다.")
@@ -38,7 +39,13 @@ import com.minipapa.quizbank.navigation.*
         OutlinedButton({ importJson.launch(arrayOf("application/json", "text/*", "application/octet-stream")) },
             Modifier.fillMaxWidth().heightIn(min = 52.dp), enabled = !LocalBusy.current) { Text("JSON 백업 파일 가져오기") }
         Hint("복원 전 중복 개수와 처리 방법을 확인할 수 있습니다. 파일 선택기로 직접 지정한 위치에 저장합니다. 가져오기는 파일당 10MB까지 지원합니다.")
+        HorizontalDivider()
+        Text("샘플 문제", style = MaterialTheme.typography.titleMedium)
+        OutlinedButton({ samples = true }, Modifier.fillMaxWidth().heightIn(min = 48.dp), enabled = !LocalBusy.current) { Text("샘플 문제 5개 추가") }
+        Hint("별도 카테고리와 ‘샘플’ 표시로 구분됩니다. 데이터는 이 기기에 저장됩니다.")
     }
+    if (samples) Confirm("샘플 문제를 추가할까요?", "‘샘플 문제’ 카테고리에 단답형 문제 5개를 추가합니다.",
+        { samples = false }, { samples = false; model.samples() })
     csv?.let { preview ->
         AlertDialog(onDismissRequest = { model.csv.value = null }, title = { Text("CSV 미리보기") }, text = {
             LazyColumn(Modifier.heightIn(max = 460.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {

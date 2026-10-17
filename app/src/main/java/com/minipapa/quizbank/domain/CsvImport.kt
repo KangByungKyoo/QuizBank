@@ -95,6 +95,7 @@ object CsvImport {
                 val q = Question(categoryId = "pending", type = type, content = f[2],
                     options = if (type == QuestionType.MULTIPLE) options else emptyList(), answer = answer, explanation = f[9])
                 q.validate()
+                require(q.content.isNotBlank()) { "문제 내용을 입력해 주세요." }
                 valid.add(ImportQuestion(row.line, path.joinToString("/"), q))
             }.onFailure { errors.add("${row.line}행: ${it.message}") }
         }

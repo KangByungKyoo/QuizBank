@@ -1,6 +1,8 @@
 package com.minipapa.quizbank.data
 
 import androidx.room.*
+import androidx.room.migration.Migration
+import androidx.sqlite.db.SupportSQLiteDatabase
 import kotlinx.coroutines.flow.Flow
 
 @Entity(tableName = "categories", foreignKeys = [ForeignKey(entity = CategoryEntity::class,
@@ -8,7 +10,7 @@ import kotlinx.coroutines.flow.Flow
 data class CategoryEntity(@PrimaryKey val id: String, val name: String, val parentId: String?)
 @Entity(tableName = "questions", foreignKeys = [ForeignKey(entity = CategoryEntity::class,
     parentColumns = ["id"], childColumns = ["categoryId"], onDelete = ForeignKey.CASCADE)], indices = [Index("categoryId")])
-data class QuestionEntity(@PrimaryKey val id: String, val categoryId: String, val type: String,
+data class QuestionEntity(@PrimaryKey val id: String, val categoryId: String?, val type: String,
     val content: String, val answer: String, val explanation: String, val createdAt: Long, val updatedAt: Long, val sample: Boolean)
 @Entity(tableName = "question_options", primaryKeys = ["questionId", "position"], foreignKeys = [ForeignKey(
     entity = QuestionEntity::class, parentColumns = ["id"], childColumns = ["questionId"], onDelete = ForeignKey.CASCADE)],
@@ -45,6 +47,7 @@ data class ExamDraftEntity(@PrimaryKey val slot: Int = 1, val json: String)
     @Query("DELETE FROM question_options WHERE questionId = :id") suspend fun deleteOptions(id: String)
     @Query("DELETE FROM categories WHERE id = :id") suspend fun deleteCategory(id: String)
     @Query("DELETE FROM questions WHERE id = :id") suspend fun deleteQuestion(id: String)
+    @Query("DELETE FROM questions") suspend fun clearQuestions()
     @Query("DELETE FROM exam_sessions") suspend fun clearSessions()
     @Query("DELETE FROM categories WHERE parentId IS NULL") suspend fun clearCategories()
     @Query("SELECT json FROM exam_draft WHERE slot = 1") suspend fun readDraft(): String?
@@ -52,5 +55,28 @@ data class ExamDraftEntity(@PrimaryKey val slot: Int = 1, val json: String)
     @Query("DELETE FROM exam_draft") suspend fun clearDraft()
 }
 @Database(entities = [CategoryEntity::class, QuestionEntity::class, QuestionOptionEntity::class,
-    ExamSessionEntity::class, ExamAnswerEntity::class, ExamDraftEntity::class], version = 1, exportSchema = true)
+    ExamSessionEntity::class, ExamAnswerEntity::class, ExamDraftEntity::class], version = 2, exportSchema = true)
 abstract class BankDatabase : RoomDatabase() { abstract fun dao(): BankDao }
+
+val MIGRATION_1_2 = object : Migration(1, 2) {
+    override fun migrate(db: SupportSQLiteDatabase) {
+        // Rebuilding the parent table fires CASCADE/SET_NULL actions. Preserve both
+        // child tables first, then restore their original rows and references.
+        db.execSQL("CREATE TEMP TABLE saved_question_options AS SELECT * FROM question_options")
+        db.execSQL("CREATE TEMP TABLE saved_exam_answers AS SELECT * FROM exam_answers")
+        db.execSQL("""CREATE TABLE questions_new (`id` TEXT NOT NULL, `categoryId` TEXT, `type` TEXT NOT NULL,
+            `content` TEXT NOT NULL, `answer` TEXT NOT NULL, `explanation` TEXT NOT NULL,
+            `createdAt` INTEGER NOT NULL, `updatedAt` INTEGER NOT NULL, `sample` INTEGER NOT NULL,
+            PRIMARY KEY(`id`), FOREIGN KEY(`categoryId`) REFERENCES `categories`(`id`) ON UPDATE NO ACTION ON DELETE CASCADE)""")
+        db.execSQL("INSERT INTO questions_new SELECT * FROM questions")
+        db.execSQL("DROP TABLE questions")
+        db.execSQL("ALTER TABLE questions_new RENAME TO questions")
+        db.execSQL("CREATE INDEX index_questions_categoryId ON questions (`categoryId`)")
+        db.execSQL("DELETE FROM question_options")
+        db.execSQL("INSERT INTO question_options SELECT * FROM saved_question_options")
+        db.execSQL("DELETE FROM exam_answers")
+        db.execSQL("INSERT INTO exam_answers SELECT * FROM saved_exam_answers")
+        db.execSQL("DROP TABLE saved_question_options")
+        db.execSQL("DROP TABLE saved_exam_answers")
+    }
+}

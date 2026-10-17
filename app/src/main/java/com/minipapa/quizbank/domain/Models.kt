@@ -14,9 +14,17 @@ data class Question(val id: String = newId(), val categoryId: String, val type: 
     val explanation: String = "", val createdAt: Long = System.currentTimeMillis(),
     val updatedAt: Long = System.currentTimeMillis(), val sample: Boolean = false) {
     val answerText get() = if (type == QuestionType.MULTIPLE) options[answer.toInt()] else answer
+    val missingRequiredFields get() = buildList {
+        if (categoryId.isBlank()) add("카테고리")
+        if (content.isBlank()) add("문제 내용")
+        if (answer.isBlank()) add("정답")
+    }
+    val isReady get() = missingRequiredFields.isEmpty()
     fun validate() {
-        require(content.isNotBlank()) { "문제 내용을 입력해 주세요." }
-        require(categoryId.isNotBlank()) { "카테고리를 선택해 주세요." }
+        if (type != QuestionType.SHORT) {
+            require(content.isNotBlank()) { "문제 내용을 입력해 주세요." }
+            require(categoryId.isNotBlank()) { "카테고리를 선택해 주세요." }
+        }
         when (type) {
             QuestionType.MULTIPLE -> {
                 require(options.size in 2..5 && options.all { it.isNotBlank() }) { "객관식 보기는 2~5개이며 빈 보기가 없어야 합니다." }
@@ -77,7 +85,8 @@ object CategoryTree {
 object ExamEngine {
     fun candidates(bank: Bank, selected: Set<String>, types: Set<QuestionType>): List<Question> {
         val ids = CategoryTree.descendants(bank.categories, selected)
-        return bank.questions.filter { (selected.isEmpty() || it.categoryId in ids) && it.type.enabled && it.type in types }
+        return bank.questions.filter { it.isReady &&
+            (selected.isEmpty() || it.categoryId in ids) && it.type.enabled && it.type in types }
     }
     fun select(bank: Bank, selected: Set<String>, types: Set<QuestionType>, count: Int,
         wrongFirst: Boolean, wrongOnly: Boolean = false, random: Random = Random.Default): List<Question> {

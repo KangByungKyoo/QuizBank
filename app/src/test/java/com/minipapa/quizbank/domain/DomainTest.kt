@@ -5,6 +5,27 @@ import org.junit.Test
 import kotlin.random.Random
 
 class DomainTest {
+    @Test fun answerOnlyQuestionsRemainNotReadyUntilCategoryAndContentAreFilled() {
+        val draft = Question("draft", "", QuestionType.SHORT, "", answer = "Docker 이미지")
+        draft.validate()
+        assertFalse(draft.isReady)
+        assertEquals(listOf("카테고리", "문제 내용"), draft.missingRequiredFields)
+        val categoryOnly = draft.copy(id = "category-only", categoryId = "c")
+        val contentOnly = draft.copy(id = "content-only", content = "읽기 전용 템플릿은?")
+        assertFalse(categoryOnly.isReady)
+        assertFalse(contentOnly.isReady)
+        val ready = categoryOnly.copy(content = contentOnly.content)
+        assertTrue(ready.isReady)
+        assertTrue(ready.explanation.isEmpty())
+        val bank = Bank(listOf(Category("c", "IT")), listOf(draft, categoryOnly, contentOnly, ready.copy(id = "ready")))
+        assertEquals(listOf("ready"), ExamEngine.select(bank, emptySet(), setOf(QuestionType.SHORT), 0, false).map { it.id })
+        assertEquals(bank, JsonCodec.readBackup(JsonCodec.backup(bank)))
+        RestoreMode.entries.forEach { mode ->
+            assertEquals(bank.questions.toSet(), RestorePlan.build(Bank(), bank, mode).questions.toSet())
+        }
+        fails { draft.copy(answer = "  ").validate() }
+        assertFalse(draft.copy(categoryId = " ", content = " ").isReady)
+    }
     @Test fun utf8AndKoreanExcelCsvKeepSingleLevelCategoryWithInternalSpaces() {
         val text = CsvImport.header.joinToString(",") +
             "\r\n 회사 업무 ,SHORT,\"다음 설명에 해당하는 용어는?\n개념 검증\",,,,,,PoC,\"첫째 줄\n둘째 줄\""

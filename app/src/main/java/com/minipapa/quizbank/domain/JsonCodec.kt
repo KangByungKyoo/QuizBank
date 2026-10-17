@@ -39,7 +39,8 @@ object JsonCodec {
     fun validate(bank: Bank) {
         CategoryTree.validate(bank.categories)
         val cats = bank.categories.map { it.id }.toSet(); val qs = bank.questions.map { it.id }.toSet()
-        require(qs.size == bank.questions.size && bank.questions.all { it.id.isNotBlank() && it.categoryId in cats }) { "문제 ID 중복 또는 잘못된 카테고리입니다." }
+        require(qs.size == bank.questions.size && bank.questions.all { it.id.isNotBlank() &&
+            (it.categoryId.isBlank() || it.categoryId in cats) }) { "문제 ID 중복 또는 잘못된 카테고리입니다." }
         bank.questions.forEach { it.validate() }
         val sessions = bank.sessions.associateBy { it.id }
         require(sessions.size == bank.sessions.size && sessions.keys.all { it.isNotBlank() }) { "시험 ID가 중복되거나 비어 있습니다." }
@@ -101,7 +102,8 @@ object RestorePlan {
         }
         val questions = current.questions.associateBy { it.id }.toMutableMap()
         incoming.questions.forEach { q ->
-            if (q.id !in questions || mode == RestoreMode.OVERWRITE) questions[q.id] = q.copy(categoryId = mapping.getValue(q.categoryId))
+            if (q.id !in questions || mode == RestoreMode.OVERWRITE) questions[q.id] = q.copy(categoryId =
+                if (q.categoryId.isBlank()) "" else mapping.getValue(q.categoryId))
         }
         val sessions = current.sessions.toMutableList()
         val answers = current.answers.toMutableList()

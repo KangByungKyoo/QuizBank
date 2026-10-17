@@ -19,7 +19,7 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 }
 
 @Composable fun ExamSetupScreen(bank: Bank, model: BankViewModel) {
-    var categories by rememberSaveable { mutableStateOf(listOf<String>()) }
+    var categories by rememberSaveable { mutableStateOf(listOfNotNull(model.homeCategory.value?.takeIf { id -> bank.categories.any { it.id == id } })) }
     var count by rememberSaveable { mutableIntStateOf(5) }
     var wrongFirst by rememberSaveable { mutableStateOf(false) }
     var aiReview by rememberSaveable { mutableStateOf(false) }
@@ -41,7 +41,7 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
         FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             QuestionType.entries.forEach { type -> FilterChip(type in typeSet, {}, label = { Text(type.label) }, enabled = type.enabled) }
         }
-        Hint("등록된 단답형 문제 내용을 그대로 출제하고, 등록된 정답으로 채점합니다.")
+        Hint("Ready 단답형 문제만 출제하고, 등록된 정답으로 채점합니다. Not Ready 문제는 제외됩니다.")
         Heading("문제 수")
         FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             listOf(5, 10, 20, 0).forEach { n -> FilterChip(count == n, { count = n }, label = { Text(if (n == 0) "전체" else "${n}개") }) }

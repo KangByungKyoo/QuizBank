@@ -10,6 +10,6 @@ class QuizBankApplication : Application() {
         super.onCreate()
         if (FirebaseApp.initializeApp(this) != null) AppCheckInstaller.install()
     }
-    val database by lazy { Room.databaseBuilder(this, BankDatabase::class.java, "quizbank.db").build() }
+    val database by lazy { Room.databaseBuilder(this, BankDatabase::class.java, "quizbank.db").addMigrations(com.minipapa.quizbank.data.MIGRATION_1_2).build() }
     val repository by lazy { BankRepository(database) }
 }

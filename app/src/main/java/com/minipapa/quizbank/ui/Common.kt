@@ -17,7 +17,9 @@ val LocalBusy = compositionLocalOf { false }
 @Composable fun QuizTheme(content: @Composable () -> Unit) {
     MaterialTheme(colorScheme = lightColorScheme(primary = Color(0xFF14675B), onPrimary = Color.White,
         primaryContainer = Color(0xFFD3EDE5), onPrimaryContainer = Color(0xFF123E35),
-        secondary = Color(0xFF596C86), secondaryContainer = Color(0xFFE0E8F4),
+        secondary = Color(0xFF4C635B), secondaryContainer = Color(0xFFD3EDE5),
+        onSecondaryContainer = Color(0xFF123E35), surfaceVariant = Color(0xFFEDF2EF),
+        surfaceContainer = Color(0xFFF0F5F2),
         background = Color(0xFFF5F8F7), surface = Color(0xFFFAFDFC)), content = content)
 }
 @Composable fun Body(content: @Composable ColumnScope.() -> Unit) {

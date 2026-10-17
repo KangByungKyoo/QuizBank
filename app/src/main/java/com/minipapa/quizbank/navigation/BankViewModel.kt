@@ -9,8 +9,8 @@ import kotlinx.coroutines.*
 import kotlinx.coroutines.flow.*
 
 enum class Page(val title: String) {
-    HOME("문제 은행"), CATEGORIES("카테고리 관리"), QUESTIONS("문제 관리"), EDIT("문제 등록"),
-    EXAM_SETUP("시험 설정"), EXAM("문제 풀이"), RESULTS("시험 결과"), WRONG("오답 노트"), STATS("학습 통계"), SETTINGS("데이터 관리")
+    HOME("문제 은행"), PROBLEMS("문제"), LEARNING("학습"), CATEGORIES("카테고리 관리"), QUESTIONS("문제 관리"), EDIT("문제 등록"),
+    EXAM_SETUP("시험 설정"), EXAM("문제 풀이"), RESULTS("시험 결과"), WRONG("오답 노트"), STATS("학습 통계"), SETTINGS("설정")
 }
 class BankViewModel(val repository: BankRepository, private val saved: SavedStateHandle, private val reviewer: AnswerReviewer? = null) : ViewModel() {
     val message = MutableStateFlow<String?>(null)
@@ -24,6 +24,13 @@ class BankViewModel(val repository: BankRepository, private val saved: SavedStat
     val editing = MutableStateFlow<Question?>(null)
     val csv = MutableStateFlow<ImportPreview?>(null)
     val backup = MutableStateFlow<Bank?>(null)
+    val homeCategory = saved.getStateFlow<String?>("homeCategory", null)
+    fun selectHomeCategory(id: String?) { saved["homeCategory"] = id }
+    fun back() = navigate(when (page.value) {
+        Page.QUESTIONS, Page.CATEGORIES -> Page.PROBLEMS
+        Page.WRONG, Page.STATS -> Page.LEARNING
+        else -> Page.HOME
+    })
     private var returnPage = Page.QUESTIONS
     init {
         if (page.value == Page.EDIT) navigate(Page.HOME)
