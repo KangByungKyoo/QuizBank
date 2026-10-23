@@ -7,12 +7,15 @@ import com.minipapa.quizbank.data.BankRepository
 import com.minipapa.quizbank.domain.*
 import kotlinx.coroutines.*
 import kotlinx.coroutines.flow.*
+import com.minipapa.quizbank.printing.PrintExportController
 
 enum class Page(val title: String) {
     HOME("문제 은행"), PROBLEMS("문제"), LEARNING("학습"), CATEGORIES("카테고리 관리"), QUESTIONS("문제 관리"), EDIT("문제 등록"),
-    EXAM_SETUP("시험 설정"), EXAM("문제 풀이"), RESULTS("시험 결과"), WRONG("오답 노트"), STATS("학습 통계"), SETTINGS("설정")
+    EXAM_SETUP("시험 설정"), EXAM("문제 풀이"), RESULTS("시험 결과"), WRONG("오답 노트"), STATS("학습 통계"), SETTINGS("설정"),
+    PRINT("문제 출력"), PRINT_PREVIEW("출력 미리보기")
 }
 class BankViewModel(val repository: BankRepository, private val saved: SavedStateHandle, private val reviewer: AnswerReviewer? = null) : ViewModel() {
+    val printExport = PrintExportController(repository, viewModelScope)
     val message = MutableStateFlow<String?>(null)
     val bank = repository.bank.catch { message.value = "데이터를 읽지 못했습니다: ${it.message}" }
         .stateIn(viewModelScope, SharingStarted.Eagerly, Bank())
@@ -27,7 +30,8 @@ class BankViewModel(val repository: BankRepository, private val saved: SavedStat
     val homeCategory = saved.getStateFlow<String?>("homeCategory", null)
     fun selectHomeCategory(id: String?) { saved["homeCategory"] = id }
     fun back() = navigate(when (page.value) {
-        Page.QUESTIONS, Page.CATEGORIES -> Page.PROBLEMS
+        Page.QUESTIONS, Page.CATEGORIES, Page.PRINT -> Page.PROBLEMS
+        Page.PRINT_PREVIEW -> Page.PRINT
         Page.WRONG, Page.STATS -> Page.LEARNING
         else -> Page.HOME
     })

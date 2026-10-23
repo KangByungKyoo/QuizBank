@@ -57,6 +57,7 @@ import com.minipapa.quizbank.navigation.*
         } else {
             MenuItem("문제 등록", "새 문제와 정답 추가", { model.edit() })
             MenuItem("문제 관리", "검색 · 정답 확인 · 수정 · 삭제", { model.navigate(Page.QUESTIONS) })
+            MenuItem("문제 출력", "A4 문제지 · 정답 및 해설 · PDF 저장", { model.navigate(Page.PRINT) })
             MenuItem("카테고리 관리", "분류와 하위 카테고리 관리", { model.navigate(Page.CATEGORIES) })
         }
     }

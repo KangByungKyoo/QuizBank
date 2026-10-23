@@ -33,7 +33,7 @@ import com.minipapa.quizbank.navigation.*
     var leave by rememberSaveable { mutableStateOf(false) }
     val roots = listOf(Page.HOME, Page.PROBLEMS, Page.LEARNING, Page.SETTINGS)
     val selectedTab = when (page) {
-        Page.PROBLEMS, Page.QUESTIONS, Page.CATEGORIES, Page.EDIT -> Page.PROBLEMS
+        Page.PROBLEMS, Page.QUESTIONS, Page.CATEGORIES, Page.EDIT, Page.PRINT, Page.PRINT_PREVIEW -> Page.PROBLEMS
         Page.LEARNING, Page.WRONG, Page.STATS -> Page.LEARNING
         Page.SETTINGS -> Page.SETTINGS
         else -> Page.HOME
@@ -97,6 +97,8 @@ import com.minipapa.quizbank.navigation.*
                         Page.RESULTS -> exam?.let { ResultsScreen(it, model) }
                         Page.STATS -> StatsScreen(bank)
                         Page.SETTINGS -> DataScreen(bank, model)
+                        Page.PRINT -> PrintSettingsScreen(bank, model)
+                        Page.PRINT_PREVIEW -> PrintPreviewScreen(model)
                     }
                 }
             }
