@@ -11,6 +11,11 @@ import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.Dp
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.KeyboardArrowDown
+import androidx.compose.ui.text.style.TextOverflow
 import com.minipapa.quizbank.domain.*
 
 val LocalBusy = compositionLocalOf { false }
@@ -28,9 +33,9 @@ val LocalBusy = compositionLocalOf { false }
 }
 @Composable fun Heading(text: String) { Text(text, style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold) }
 @Composable fun Hint(text: String) { Text(text, color = MaterialTheme.colorScheme.onSurfaceVariant, style = MaterialTheme.typography.bodyMedium) }
-@Composable fun Action(text: String, onClick: () -> Unit, modifier: Modifier = Modifier, enabled: Boolean = true) {
+@Composable fun Action(text: String, onClick: () -> Unit, modifier: Modifier = Modifier, enabled: Boolean = true, minHeight: Dp = 52.dp) {
     val keyboard = LocalSoftwareKeyboardController.current
-    Button({ keyboard?.hide(); onClick() }, modifier.fillMaxWidth().heightIn(min = 52.dp), enabled = enabled && !LocalBusy.current) { Text(text) }
+    Button({ keyboard?.hide(); onClick() }, modifier.fillMaxWidth().heightIn(min = minHeight), enabled = enabled && !LocalBusy.current) { Text(text) }
 }
 @Composable fun Tile(title: String, subtitle: String, onClick: () -> Unit) {
     OutlinedCard(onClick = onClick, enabled = !LocalBusy.current, modifier = Modifier.fillMaxWidth()) {
@@ -46,10 +51,17 @@ val LocalBusy = compositionLocalOf { false }
         dismissButton = { TextButton(onDismiss) { Text("취소") } })
 }
 @Composable fun CategoryPicker(categories: List<Category>, selected: String?, onSelect: (String?) -> Unit,
-    allowAll: Boolean = false, label: String = "카테고리") {
+    allowAll: Boolean = false, label: String = "카테고리", minHeight: Dp = 52.dp,
+    modifier: Modifier = Modifier, compact: Boolean = false) {
     var open by remember { mutableStateOf(false) }
-    OutlinedButton({ open = true }, Modifier.fillMaxWidth().heightIn(min = 52.dp), enabled = !LocalBusy.current) {
-        Text("$label: ${if (selected == null) if (allowAll) "전체" else "선택해 주세요" else CategoryTree.path(categories, selected)}")
+    OutlinedButton({ open = true }, modifier.fillMaxWidth().heightIn(min = minHeight), enabled = !LocalBusy.current,
+        shape = if (compact) RoundedCornerShape(10.dp) else ButtonDefaults.outlinedShape,
+        contentPadding = if (compact) PaddingValues(horizontal = 10.dp, vertical = 8.dp) else ButtonDefaults.ContentPadding) {
+        Text("$label: ${if (selected == null) if (allowAll) "전체" else "선택해 주세요" else CategoryTree.path(categories, selected)}",
+            modifier = if (compact) Modifier.weight(1f) else Modifier,
+            maxLines = if (compact) 1 else Int.MAX_VALUE, overflow = TextOverflow.Ellipsis,
+            color = if (compact) MaterialTheme.colorScheme.onSurface else MaterialTheme.colorScheme.primary)
+        if (compact) Icon(Icons.Default.KeyboardArrowDown, contentDescription = null, modifier = Modifier.size(18.dp))
     }
     if (open) AlertDialog(onDismissRequest = { open = false }, title = { Text(label) }, text = {
         Column(Modifier.heightIn(max = 420.dp).verticalScroll(rememberScrollState())) {

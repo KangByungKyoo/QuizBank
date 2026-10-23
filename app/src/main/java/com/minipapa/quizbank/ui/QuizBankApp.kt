@@ -15,6 +15,8 @@ import androidx.compose.material.icons.filled.Home
 import androidx.compose.material.icons.automirrored.filled.List
 import androidx.compose.material.icons.filled.DateRange
 import androidx.compose.material.icons.filled.Settings
+import androidx.compose.material.icons.filled.Add
+import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.minipapa.quizbank.navigation.*
 
@@ -44,7 +46,11 @@ import com.minipapa.quizbank.navigation.*
     LaunchedEffect(message) { message?.let { snack.showSnackbar(it); model.message.value = null } }
     CompositionLocalProvider(LocalBusy provides busy) {
         Scaffold(snackbarHost = { SnackbarHost(snack) }, bottomBar = {
-            if (showNavigation) NavigationBar {
+            if (showNavigation) NavigationBar(
+                modifier = Modifier.windowInsetsPadding(NavigationBarDefaults.windowInsets)
+                    .height(if (page == Page.QUESTIONS) 64.dp else 80.dp),
+                windowInsets = WindowInsets(0, 0, 0, 0)
+            ) {
                 roots.forEach { tab ->
                     val icon = when (tab) {
                         Page.HOME -> Icons.Default.Home
@@ -60,9 +66,17 @@ import com.minipapa.quizbank.navigation.*
             Surface(color = MaterialTheme.colorScheme.background) {
                 Row(Modifier.fillMaxWidth().statusBarsPadding().padding(horizontal = 12.dp, vertical = 8.dp),
                     verticalAlignment = Alignment.CenterVertically) {
-                    if (page !in roots) TextButton({ back() }, enabled = !busy) { Text("‹ 뒤로") }
+                    if (page == Page.QUESTIONS) IconButton({ back() }, enabled = !busy) {
+                        Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "뒤로")
+                    } else if (page !in roots) TextButton({ back() }, enabled = !busy) { Text("‹ 뒤로") }
                     Text(if (page == Page.EDIT && editing != null) "문제 수정" else page.title,
                         style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold, modifier = Modifier.weight(1f))
+                    if (page == Page.QUESTIONS) Button({ model.edit() }, enabled = !busy,
+                        contentPadding = PaddingValues(horizontal = 14.dp, vertical = 10.dp)) {
+                        Icon(Icons.Default.Add, contentDescription = null, modifier = Modifier.size(20.dp))
+                        Spacer(Modifier.width(6.dp))
+                        Text("문제 등록")
+                    }
                     if (busy) CircularProgressIndicator(Modifier.size(24.dp), strokeWidth = 2.dp)
                 }
             }
